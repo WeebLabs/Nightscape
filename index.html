@@ -112,6 +112,11 @@
   #grade .foot span { color: var(--panel-muted); font-size: 11px; }
   #grade .foot button { font: inherit; color: var(--panel-fg); background: transparent; border: 1px solid var(--panel-line); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
   #grade .foot button:hover { border-color: var(--accent); }
+  #grade .stats { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 6px 0 4px; font-size: 11.5px; }
+  #grade .stats span { color: var(--panel-muted); }
+  #grade .stats b { font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; white-space: pre; }
+  #grade .check { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; font-size: 11.5px; color: var(--panel-fg); cursor: pointer; }
+  #grade .check input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
 </style>
 </head>
 <body>
@@ -1114,7 +1119,7 @@ function render(dt) {
 }
 
 function adapt(rawDt) {
-  if (DBG) return;
+  if (DBG || (typeof quality !== 'undefined' && !quality.auto)) return;
   if (rawDt > 0.25) return;        // tab switch or hitch: ignore
   perfAcc += rawDt; perfN++;
   if (perfN < 90) return;
@@ -1142,6 +1147,7 @@ function loop(now) {
   frame++;
   render(dt);
   adapt(raw);
+  perfTick(raw);
   if (!shown && frame > 2) {
     shown = true;
     canvas.classList.add('on');
@@ -1227,6 +1233,17 @@ function buildPanel() {
     html += '</div>';
   }
   html += '<div class="foot"><span id="g-name"></span><button type="button" id="g-reset">Reset</button></div>';
+  html += `<div class="sec">Performance</div>
+    <div class="stats" aria-live="off">
+      <span>Clouds</span><b id="q-cloud">–</b>
+      <span>Screen</span><b id="q-screen">–</b>
+      <span>Frame rate</span><b id="q-fps">–</b>
+    </div>
+    <div class="row"><label for="q-scale">Cloud resolution</label><output id="q-scale-v"></output>
+      <div class="ctl"><input type="range" id="q-scale" min="15" max="100" step="1"></div>
+      <div class="ends"><span>Faster</span><span>Sharper</span></div>
+    </div>
+    <label class="check"><input type="checkbox" id="q-auto"> Adjust automatically to keep motion smooth</label>`;
   gradeBody.innerHTML = html;
 }
 function syncPanel() {
@@ -1243,6 +1260,7 @@ function syncPanel() {
 buildPanel(); syncPanel(); applyGrade();
 gradeBody.addEventListener('input', e => {
   const t = e.target;
+  if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
@@ -1277,6 +1295,56 @@ function wake() {
 window.addEventListener('pointermove', wake);
 window.addEventListener('pointerdown', wake);
 wake();
+
+/* ---------------------------------------------------------------------------
+   Performance readout and cloud-resolution control
+   (resolution shown as a share of the screen's real pixel width and height)
+--------------------------------------------------------------------------- */
+const QUALITY_STORE = 'moonlit-cloud-sea:quality:v1';
+let quality = { auto: true, pct: 50 };
+try { const q = JSON.parse(localStorage.getItem(QUALITY_STORE) || 'null'); if (q && typeof q.auto === 'boolean') quality = q; } catch (e) {}
+const qScale = document.getElementById('q-scale'), qAuto = document.getElementById('q-auto');
+const qScaleV = document.getElementById('q-scale-v');
+const qCloud = document.getElementById('q-cloud'), qScreen = document.getElementById('q-screen'), qFps = document.getElementById('q-fps');
+const currentPct = () => Math.round(scale / DPR * 100);
+function syncQuality() {
+  qAuto.checked = quality.auto;
+  qScale.value = quality.auto ? currentPct() : quality.pct;
+  qScaleV.textContent = (quality.auto ? currentPct() : quality.pct) + '%' + (quality.auto ? ' · auto' : '');
+}
+let qTimer = 0;
+function setManualScale(pct) {
+  quality.pct = pct;
+  clearTimeout(qTimer);
+  qTimer = setTimeout(() => { scale = Math.max(0.1, pct / 100 * DPR); resizeTargets(); }, 120);
+}
+function onQualityInput(t) {
+  if (t.id === 'q-auto') {
+    quality.auto = t.checked;
+    if (!quality.auto) setManualScale(currentPct());
+    else perfN = 0, perfAcc = 0;
+  } else {
+    quality.auto = false;
+    setManualScale(parseInt(t.value, 10));
+  }
+  try { localStorage.setItem(QUALITY_STORE, JSON.stringify(quality)); } catch (e) {}
+  syncQuality();
+}
+if (!quality.auto && !DBG) { scale = Math.max(0.1, quality.pct / 100 * DPR); resizeTargets(); }
+syncQuality();
+let fpsN = 0, fpsT = 0;
+function perfTick(raw) {
+  if (raw > 0.25) return;
+  fpsN++; fpsT += raw;
+  if (fpsT < 0.5) return;
+  const fps = fpsN / fpsT;
+  fpsN = 0; fpsT = 0;
+  if (!gradeEl.classList.contains('open')) return;
+  qFps.textContent = fps.toFixed(0) + ' fps · ' + (1000 / fps).toFixed(1) + ' ms';
+  qCloud.textContent = cloudRT.width + ' × ' + cloudRT.height + '  (' + currentPct() + '%)';
+  qScreen.textContent = Math.round(window.innerWidth * DPR) + ' × ' + Math.round(window.innerHeight * DPR);
+  if (quality.auto && document.activeElement !== qScale) syncQuality();
+}
 
 /* ---------------------------------------------------------------------------
    Full screen

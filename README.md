@@ -69,9 +69,9 @@ Most of the development effort went into making the clouds hold still while the 
 
 The cloud pass writes depth together with transmittance into a 32-bit float target. The accumulation pass uses that depth to reproject each pixel into the previous frame. It clamps the history to the current 3×3 neighbourhood's colour range to prevent ghosting, then blends, leaning more on the new frame where motion is fast. The accumulated image carries over when the render resolution changes, so changes don't reset to noise. Without `EXT_color_buffer_float` the page falls back to unaccumulated rendering.
 
-### Adaptive resolution
+### Resolution and performance readout
 
-The cloud pass renders at 26–80% of screen resolution, adjusted automatically from measured frame times. The adjustment uses wide hysteresis so changes are rare.
+By default the cloud pass renders at 26–80% of the window's size, adjusted automatically from measured frame times with wide hysteresis so changes are rare. The panel's Performance section shows the live cloud resolution, screen resolution and frame rate. A slider pins the cloud resolution anywhere from 15% to 100% of the screen's real pixel width and height; ticking "Adjust automatically" hands control back. The choice is saved in the browser.
 
 ## Colour grade
 
@@ -112,6 +112,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
     - Cumulonimbus heights were varied, with anvils only on the tall ones.
     - The short towers were rebuilt as clusters of thermal bubbles.
 12. **Colour grade.** Teal Night became the default, with the preset and control panel added.
+13. **Performance readout.** The panel shows the live resolution and frame rate and can pin the cloud resolution.
 
 ## Known limitations and ideas
 
