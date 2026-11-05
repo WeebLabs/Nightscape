@@ -455,6 +455,13 @@ float sceneSD(vec3 p){
   float cb = cumulonimbus(p, bil, lob);
   return smax(smax(sea, tw, 0.9), cb, 1.2);
 }
+// Same field without the above-the-deck shortcut, which is only a bound for skipping
+// and must not be baked as if it were real cloud.
+float sceneSDFull(vec3 p){
+  float bil = billow(p);
+  float lob = lobes(p);
+  return smax(smax(seaSD(p, bil), towers(p, bil, lob), 0.9), cumulonimbus(p, bil, lob), 1.2);
+}
 float densLight(float sd){ return clamp((sd + 0.1) * 1.3, 0.0, 1.0); }
 `;
 
@@ -489,7 +496,8 @@ void main(){
     up += densLight(sceneSD(q)) * ds;
     tt += ds; ds *= 1.15;
   }
-  gl_FragColor = vec4(1.0 - exp(-od * 0.25), 1.0 - exp(-up * 0.4), 0.0, 1.0);
+  // B: the cloud shape field itself, so rendering can read it instead of rebuilding it
+  gl_FragColor = vec4(1.0 - exp(-od * 0.25), 1.0 - exp(-up * 0.4), clamp((sceneSDFull(p) + 10.0) / 16.0, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -509,6 +517,20 @@ const vec3 AMB_HI = vec3(0.040, 0.060, 0.118);
 ${WORLD}
 uniform sampler3D uBake;
 // optical depth toward the moon (x) and toward the sky above (y), from the bake
+// Cloud shape at render time: the baked field (deck, heaps and cumulonimbus with their
+// large billows) plus one octave of finer live billowing for the small cauliflower detail.
+float bakedSD(vec3 p){
+  float w = (p.y - Y_MIN) / (Y_MAX - Y_MIN);
+  if (w >= 1.0) return -4.0 - (p.y - Y_MAX);
+  return texture(uBake, vec3(p.x / TILE, p.z / TILE, w)).b * 16.0 - 10.0;
+}
+float shapeSD(vec3 p){
+  float sd = bakedSD(p);
+  if (sd < -1.2) return sd + 0.6;            // well clear of cloud: a safe bound, no detail needed
+  vec3 q = p * F_BIL;
+  q = vec3(2.0 * q.x + q.z, 2.0 * q.y, 2.0 * q.z - q.x) + 0.37;   // the billow octave the bake can only half resolve
+  return sd + (texture(uNoise, q).r - 0.5) * 0.9;
+}
 vec2 baked(vec3 p){
   vec4 b = texture(uBake, vec3(p.x / TILE, p.z / TILE, (p.y - Y_MIN) / (Y_MAX - Y_MIN)));
   return vec2(-log(max(1.0 - b.r, 2e-3)) * 4.0, -log(max(1.0 - b.g, 2e-3)) * 2.5);
@@ -519,7 +541,7 @@ vec2 lightAt(vec3 p, float t){
   float f = smoothstep(55.0, 80.0, t);
   vec2 farL = f > 0.0 ? baked(p + uMoonDir * 0.3) : vec2(0.0);
   if (f >= 1.0) return farL;
-  float od = densLight(sceneSD(p + uMoonDir * 0.15)) * 0.3 + densLight(sceneSD(p + uMoonDir * 0.45)) * 0.3;
+  float od = densLight(shapeSD(p + uMoonDir * 0.15)) * 0.3 + densLight(shapeSD(p + uMoonDir * 0.45)) * 0.3;
   vec2 b = baked(p + uMoonDir * 0.6);
   return mix(vec2(od + b.x, b.y), farL, f);
 }
@@ -615,7 +637,7 @@ void main(){
   for (int i = 0; i < 300; i++){
     if (t > tMax || T < 0.012) break;
     vec3 p = ro + rd * t;
-    float sd = sceneSD(p);
+    float sd = shapeSD(p);
     float spB = planar ? planeSpacing(t * rz) : 0.0;
     // Near a cloud surface, step on a 4x finer set of (still world-fixed) planes so
     // small puffs and wisps are always caught rather than slipping between samples.

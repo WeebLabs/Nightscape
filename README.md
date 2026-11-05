@@ -51,9 +51,13 @@ The moon and the clouds never move, so lighting is computed once on the GPU when
 - **Optical depth toward the moon.** This comes from a long march of about 300 units, so tall clouds cast long, soft shadows. Distant parts of a shadow fade, as scattered light would fill them in.
 - **Optical depth straight up toward the sky.** This is used for ambient occlusion in basins and under cloud bodies.
 
+- **The cloud shape itself**: the full field (deck, heaps and cumulonimbus with their large billows) as a signed distance.
+
 The bake runs in small chunks across several frames to avoid stalling the GPU. It is rendered into a 2D atlas of slices, read back, and uploaded as a 256 × 96 × 256 3D texture that wraps with the tile. A "Lighting the clouds…" note appears only if baking takes longer than about half a second.
 
-At runtime each cloud sample takes two crisp local samples toward the moon, so edges stay sharp, then reads the bake for everything beyond. Beyond about 70 units only the bake is used, with a smooth blend between 55 and 80 units. Shading combines Beer–Lambert transmittance, a dual-lobe Henyey–Greenstein phase function, a three-octave multiple-scattering approximation, a "powder" term, and height- and occlusion-weighted ambient light. Moonlight shifts from cool silver to warm toward the moon, and haze thins with altitude so distant giants stay visible.
+At runtime the cloud shape is read from the bake and one octave of finer live billowing is added on top, instead of rebuilding the whole field per sample. In clear air a sample is a single texture read, and the baked distance also says how far a ray can safely skip. This made the cloud pass roughly 5× cheaper. The bake stores the true field: the above-the-deck shortcut used to speed up skipping is deliberately kept out of it, since baking that shortcut showed up as a phantom sheet of puffs.
+
+Each cloud sample also takes two crisp local samples toward the moon, so edges stay sharp, then reads the bake for everything beyond. Beyond about 70 units only the bake is used, with a smooth blend between 55 and 80 units. Shading combines Beer–Lambert transmittance, a dual-lobe Henyey–Greenstein phase function, a three-octave multiple-scattering approximation, a "powder" term, and height- and occlusion-weighted ambient light. Moonlight shifts from cool silver to warm toward the moon, and haze thins with altitude so distant giants stay visible.
 
 ### Sampling built for stability
 
@@ -113,6 +117,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
     - The short towers were rebuilt as clusters of thermal bubbles.
 12. **Colour grade.** Teal Night became the default, with the preset and control panel added.
 13. **Performance readout.** The panel shows the live resolution and frame rate and can pin the cloud resolution.
+14. **Baked cloud shape.** Rendering reads a baked copy of the cloud field plus live fine detail, about 5.5× faster per frame in testing, with matching appearance.
 
 ## Known limitations and ideas
 
@@ -121,7 +126,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 - **Slower GPUs.** Integrated graphics will run at reduced cloud resolution, so the image is softer.
 - **Distant anvils** can occasionally read as mushroom caps. Stretching them further downwind and thinning their edges would help.
 - **Clouds in the shadow** of a large cumulonimbus can look flat. Skylight relief was strengthened, but there's room for more.
-- **Possible next step:** temporal upsampling (rendering a fraction of the pixels each frame) could raise cloud detail further at the same cost.
+- **Possible next step:** temporal upsampling (rendering a quarter of the cloud pixels each frame and rebuilding the rest from recent frames) could add another 3–4× on top of the shape bake.
 
 ## Files
 
