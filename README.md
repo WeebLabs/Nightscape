@@ -1,6 +1,6 @@
 # Moonlit Cloud Sea
 
-An endless, idle flight just above a moonlit sea of clouds, rendered in real time with Three.js. The camera drifts forward along the cloud tops, weaving past cumulus heaps and towering cumulonimbus with wind-dragged anvils. Through breaks in the deck you can see the night ocean far below. A full moon sits low ahead, throwing silver linings and light shafts through the clouds.
+An endless, idle flight just above a moonlit sea of clouds, rendered in real time with Three.js. The camera drifts forward along the cloud tops, weaving past cumulus heaps and towering cumulonimbus with wind-dragged anvils. Through breaks in the deck you can see flooded mountains far below: forested ridges and winding lakes catching the moon. A full moon sits low ahead, throwing silver linings and light shafts through the clouds.
 
 Everything is in a single self-contained file, `index.html`. Open it in a current desktop browser with WebGL 2 (Chrome, Edge, Firefox or Safari). Nothing else needs to be served alongside it; the only external request is Three.js r128 from cdnjs.
 
@@ -24,7 +24,15 @@ The cursor and the closed panel button fade out after a couple of seconds withou
 
 **Cumulonimbus.** A few per world tile, mostly mid-sized with occasional giants. Each has a broad, lumpy updraft column that leans slightly with height. The tall ones flatten into an anvil dragged out by upper-level wind, with an overshooting dome punching through the top. They're kept clear of the flight path, so you pass beside and sometimes under the anvils.
 
-**Ocean.** Seen through the breaks, about 85 units below. The waves are four octaves at unrelated scales and angles, plus a slow domain warp and calm/rough "wind slick" patches, so nothing repeats visibly. The moon lays a soft glittering path on the water. That path is dimmed wherever the deck blocks the moon's line to that patch of sea.
+**Flooded mountains.** Seen through the breaks, about 85 units below: eroded ranges with sharp ridges, gullies and smooth valley floors, half drowned so the valleys become winding lakes and fjords. Forest covers the gentler slopes below a ragged tree line, in patches with clearings, and gives way to meadow and bare rock on cliffs and peaks, with a dark wet band along the shores. The low moon throws long shadows across the ranges and lays a soft glitter path on the lakes, broader where wind roughens the water. The lakes reflect the sky and the mountains around them. The deck's shadow falls on all of it, so only ground under a break is moonlit.
+
+The terrain never changes and the moon never moves, so nearly all of it is baked at startup into four tiling 1024 × 1024 textures:
+- **Height:** the ground plus a tree canopy of crowns grouped in clumps, with forest density and rock grain.
+- **Light:** moonlight with soft shadows cast toward the moon, and how much sky each point sees past the surrounding ridges.
+- **Colour:** forest, meadow, rock, shore and lake bed.
+- **Horizons:** how high the land rises in four directions from every point, which tells a lake when its reflection shows a mountain instead of sky.
+
+Each frame then only finds where a ray meets the ground (a height-field march through the baked height) and adds the live parts: the deck's shadow, the moon's glitter, and fine crown and rock texture up close. From this high up, ripples on the lakes are far smaller than a pixel, so the water is shaded as a smooth mirror with a little roughness instead of with per-pixel waves. Lightning ground strikes land on the terrain's real surface, read from a CPU copy of the baked heights. Open the page with `?noclouds` to see the ground on its own.
 
 **Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map (public domain), embedded in the page. You see the real near side, north up, with the maria and Tycho in their correct places. A layered halo surrounds it. The sky is a deep gradient with a warm glow along the horizon under the moon, and procedural twinkling stars that fade near the moon's glare and the horizon.
 
@@ -32,9 +40,9 @@ The cursor and the closed panel button fade out after a couple of seconds withou
 
 - **Deep flashes** fire in the core of the tower, well inside the cloud. Their light is scattered through so much cloud that the tower only glows softly from within. They are set to 70% of a ground strike's strength, with slower, gentler pulses and no visible channel.
 
-- **Ground strikes** have a faint stepped leader that works its way down, then one to four return strokes tens of milliseconds apart. Some strokes carry a flickering continuing current. Some strikes leave the cloud base and show only through breaks in the deck. Others leave the side of the tower and arc through clear air before dropping to the sea, which is known as a "bolt from the blue". Before a strike is chosen, ten candidate channels are tested against the baked cloud field, and the one the camera sees best wins.
+- **Ground strikes** have a faint stepped leader that works its way down, then one to four return strokes tens of milliseconds apart. Some strokes carry a flickering continuing current. Some strikes leave the cloud base and show only through breaks in the deck. Others leave the side of the tower and arc through clear air before dropping to the ground, which is known as a "bolt from the blue". Before a strike is chosen, ten candidate channels are tested against the baked cloud field, and the one the camera sees best wins.
 - **Near-surface in-cloud flashes** fire between charge regions inside the tower as a train of pulses that wander along the channel. On the tall towers with an anvil, some run as "crawlers" just under the anvil base.
-- **Cloud lighting.** Each flash also acts as two line lights along its channel inside the cloud ray march. Light from a channel buried in cloud is scattered many times before it escapes, so it fades far more gently than direct moonlight. Three reads of the bake estimate how much cloud lies in between. The result is a hot spot near the channel that spreads through the whole tower. A ground strike also lights the sea around its strike point and the rainy air under the deck.
+- **Cloud lighting.** Each flash also acts as two line lights along its channel inside the cloud ray march. Light from a channel buried in cloud is scattered many times before it escapes, so it fades far more gently than direct moonlight. Three reads of the bake estimate how much cloud lies in between. The result is a hot spot near the channel that spreads through the whole tower. A ground strike also lights the land and water around its strike point and the rainy air under the deck.
 - **The bolt** is drawn at full resolution as a jagged, branching channel made by midpoint displacement. Each point of the channel marches the baked cloud field back to the camera, so cloud in front hides it and thin cloud only veils it.
 - Storms often flash in quick bursts, so there's a 30% chance that the next flash follows within two seconds, usually from the same tower.
 - The panel's Weather section turns lightning off or makes it rarer or more frequent. These settings are saved in the browser. With "reduce motion" set in the operating system, flashes are softer and single, with no rapid flicker.
@@ -43,13 +51,14 @@ The cursor and the closed panel button fade out after a couple of seconds withou
 
 ## How it renders
 
-Each frame runs four full-screen passes, plus a fifth while a lightning bolt is visible:
+Each frame runs five full-screen passes, plus a sixth while a lightning bolt is visible:
 
 1. **Cloud pass** (reduced resolution). Ray-marches the cloud volume per pixel and outputs scattered light, transmittance and a depth estimate.
-2. **Temporal accumulation.** Blends the new frame with the reprojected history to remove residual noise and stabilise edges.
-3. **Light shafts.** Radial blur toward the moon's screen position.
-4. **Lightning bolt** (full resolution, only during a flash). Draws the channel as screen-facing strips into its own buffer.
-5. **Composite** (full resolution). Draws the sky, stars and moon, combines them with the clouds and shafts, then applies tone mapping and the colour grade.
+2. **Ground pass** (same resolution). For pixels that see down through a break, finds and shades the flooded mountains behind whatever cloud is left in front. Every other pixel passes straight through. Keeping it out of the cloud pass keeps that heavy shader lean.
+3. **Temporal accumulation.** Blends the new frame with the reprojected history to remove residual noise and stabilise edges.
+4. **Light shafts.** Radial blur toward the moon's screen position.
+5. **Lightning bolt** (full resolution, only during a flash). Draws the channel as screen-facing strips into its own buffer.
+6. **Composite** (full resolution). Draws the sky, stars and moon, combines them with the clouds and shafts, then applies tone mapping and the colour grade.
 
 ### The world is one seamless tile
 
@@ -134,7 +143,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 12. **Colour grade.** Teal Night became the default, with the preset and control panel added.
 13. **Performance readout.** The panel shows the live resolution and frame rate and can pin the cloud resolution.
 14. **Baked cloud shape.** Rendering reads a baked copy of the cloud field plus live fine detail, about 5.5× faster per frame in testing, with matching appearance.
-15. **Lightning.** Ground strikes and in-cloud flashes from the cumulonimbus, with matching cloud, sea and sky lighting. A held flash adds well under a millisecond per frame in testing.
+15. **Lightning.** Ground strikes and in-cloud flashes from the cumulonimbus, with matching cloud, ground and sky lighting. A held flash adds well under a millisecond per frame in testing.
 16. **Edge popping.** Small pieces at the sides and tops of clouds, especially the cumulonimbus, blinked in and out as the camera moved. Five sources were traced to individual pixels:
     - the hard end of the march, now a soft far limit;
     - skips that leapt over cloud because the baked field understates distance near steep shapes, now shorter;
@@ -144,6 +153,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 
     Measured at 61% cloud resolution over 4 positions and 48 frames each, cloud jumps larger than 32 brightness levels fell from 327 to 4, and jumps larger than 64 levels from 112 to none. The frame costs about 15% more GPU time. Most of that is the march now sampling planes it used to skip by mistake. Sub-pixel jitter was also tried and made no visible difference, so it was left out.
 17. **Near-cloud fog.** Fog took its colour from the sky in each pixel's direction, so close clouds crossing the horizon on screen wore a band of horizon glow. Close-range fog is now a plain night blue that blends into the sky's colour between 100 and 250 units.
+18. **Flooded mountains.** The ocean's waves read as a curly texture rather than water, so the ground became flooded mountains with forests and lakes, baked into tiling textures (height with canopy, moonlight and shadows, sky visibility, colour, horizons). It is drawn in its own pass, and costs slightly less than the old ocean did: about 49 ms against 54 ms per frame in a GPU-timed comparison at 61% cloud resolution in a hidden browser pane, where absolute times run high. The terrain bake runs after the cloud bake at startup, in strips across several frames.
 
 ## Known limitations and ideas
 
