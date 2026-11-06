@@ -1113,6 +1113,26 @@ void main(){
 }
 `;
 
+// A few bright "hero" stars low over the horizon ahead: [degrees right of straight
+// ahead (-z), degrees above the horizon, brightness, colour, twinkle]. They sit clear
+// of the moon (15 degrees left, 12 up). Low down they are dimmed and reddened by the
+// long path through the air. The lowest is a planet like Mars, which barely twinkles.
+const HERO_STARS = [
+  [1, 2.5, 6.0, [1.00, 0.56, 0.36], 0.3],   // the lowest, near the middle: reddish and steadier, like Mars
+  [16, 5.5, 7.0, [0.82, 0.89, 1.00], 1],    // blue-white, like Vega
+  [27, 9.0, 5.5, [1.00, 0.93, 0.80], 1],    // warm white
+  [-28, 6.0, 5.0, [0.94, 0.96, 1.00], 1]    // white
+];
+const HERO_GLSL = HERO_STARS.map(([az, el, b, c, twk]) => {
+  const A = az * Math.PI / 180, E = el * Math.PI / 180;
+  const d = [Math.sin(A) * Math.cos(E), Math.sin(E), -Math.cos(A) * Math.cos(E)];
+  const ext = 0.35 + 0.65 * Math.min(Math.max(el / 14, 0), 1);          // extinction near the horizon
+  const warm = 1 - Math.min(Math.max(el / 12, 0), 1);
+  const col = [c[0], c[1] * (1 - 0.15 * warm), c[2] * (1 - 0.35 * warm)].map(v => (v * b * ext).toFixed(3));
+  const f = (v) => v.toFixed(5);
+  return `  col += heroStar(rd, vec3(${f(d[0])}, ${f(d[1])}, ${f(d[2])}), vec3(${col.join(', ')}), ${((0.18 + 0.25 * warm) * twk).toFixed(3)}, ${(az * 0.37).toFixed(2)});`;
+}).join('\n');
+
 const COMPOSITE_FRAG = `
 precision highp float;
 precision highp sampler3D;
@@ -1123,17 +1143,27 @@ uniform vec3 uSkyFlash, uFlashDir;
 uniform vec2 uCloudTexel, uRes;
 uniform vec3 uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime, uFrame, uPixAng, uMoonR, uExposure, uMoonReady;
+uniform float uTwinkle, uStarLow;   // Sky panel: how much stars twinkle, how low they reach
 uniform sampler2D uMoonMap;
 uniform vec3 uBalance, uShadowTint, uHighTint;
 uniform float uShadowAmt, uHighAmt, uLift, uSat, uContrast, uVignette, uGrain, uRays;
 varying vec2 vUv;
 ${COMMON}
 
+// Twinkling: the air's turbulence flickers a star a few times a second, irregularly.
+// amp is how deep the flicker goes.
+float twinkle(float seed, float amp){
+  float n = 0.5 * sin(uTime * (11.0 + 7.0 * fract(seed * 1.37)) + seed * 40.0)
+          + 0.3 * sin(uTime * (17.0 + 9.0 * fract(seed * 2.11)) + seed * 13.0)
+          + 0.2 * sin(uTime * (5.0 + 3.0 * fract(seed * 3.70)) + seed * 7.0);
+  return 1.0 - amp * (0.5 + 0.5 * n);
+}
 vec3 stars(vec3 rd){
   vec3 col = vec3(0.0);
   for (int l = 0; l < 2; l++){
     float sc = l == 0 ? 150.0 : 330.0;
     float thr = l == 0 ? 0.9935 : 0.9915;
+    thr -= (1.0 - smoothstep(0.0, 0.3, rd.y)) * (l == 0 ? 0.0065 : 0.0085);   // twice as many low over the horizon
     float w = max(0.045, uPixAng * sc * 0.85);
     vec3 p = rd * sc;
     vec3 c0 = floor(p);
@@ -1158,11 +1188,29 @@ vec3 stars(vec3 rd){
       vec3 v = pt - rd * dot(pt, rd);
       float d = length(v);
       float mag = (l == 0 ? 1.0 : 0.45) * (0.18 + 2.6 * pow(h2.y, 7.0));
-      float tw = 0.72 + 0.28 * sin(uTime * (1.3 + h2.z * 2.7) + h.y * 40.0);
+      // twinkling, deeper low down where the starlight crosses more air
+      float tw = twinkle(h.y + h2.x * 3.1, min(mix(0.6, 0.32, smoothstep(0.05, 0.45, rd.y)) * uTwinkle, 1.0));
       vec3 tint = mix(vec3(0.70, 0.80, 1.00), vec3(1.00, 0.88, 0.72), h.z);
       col += tint * mag * tw * exp(-d * d / (w * w)) * (0.045 * 0.045) / (w * w);
     }
   }
+  return col;
+}
+
+// one bright star at a fixed direction: a pixel-sized core, a faint glow, and twinkling
+// that grows stronger toward the horizon (tw: how much)
+vec3 heroStar(vec3 rd, vec3 dir, vec3 col, float tw, float ph){
+  vec3 v = rd - dir;
+  float th2 = dot(v, v);
+  float wr = max(uPixAng * 0.9, 3.0e-4);
+  if (th2 > 900.0 * wr * wr) return vec3(0.0);
+  float core = exp(-th2 / (wr * wr)) * (9.0e-8 / (wr * wr));
+  float glow = 0.025 * exp(-sqrt(th2) / (wr * 3.0)) * (3.0e-4 / wr);
+  return col * (core + glow) * twinkle(ph * 0.137 + 0.5, min(tw * 1.6 * uTwinkle, 1.0));
+}
+vec3 heroStars(vec3 rd){
+  vec3 col = vec3(0.0);
+${HERO_GLSL}
   return col;
 }
 
@@ -1201,10 +1249,14 @@ void main(){
   vec3 m = uMoonDir;
 
   float am = 2.0 * asin(clamp(length(rd - m) * 0.5, 0.0, 1.0));
-  float starVis = smoothstep(0.0, 0.28, rd.y) * smoothstep(0.06, 0.45, am);
+  // stars reach almost to the horizon, a little dimmer low down where the air is thickest
+  // (uStarLow: the height, as sin of the angle, where they have fully faded in)
+  float starVis = smoothstep(max(uStarLow - 0.035, 0.0), uStarLow, rd.y) * mix(0.7, 1.0, smoothstep(0.0, 0.2, rd.y)) * smoothstep(0.06, 0.45, am);
   float diskMask = 1.0 - smoothstep(uMoonR * 0.92, uMoonR * 0.99, am);
   // (stars only where they can show: above the horizon, clear of the moon and the clouds)
   vec3 st = starVis * c.a > 0.0 ? stars(rd) * starVis : vec3(0.0);
+  // the hero stars low over the horizon (the regular field has faded out there)
+  if (rd.y > 0.0 && rd.y < 0.3 && c.a > 0.0) st += heroStars(rd) * smoothstep(0.0, 0.015, rd.y) * smoothstep(0.03, 0.2, am);
   vec3 sky = skyBase(rd, m) * (1.0 - 0.82 * diskMask) + st + moonDisk(rd, m);
 
   vec3 col = c.rgb + sky * c.a;
@@ -1405,6 +1457,7 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   tCloud: { value: null }, tRays: { value: null }, uNoise: { value: noiseTex },
   uCloudTexel: { value: new THREE.Vector2() }, uRes: { value: new THREE.Vector2() },
   uPixAng: { value: 0.001 }, uMoonR: { value: MOON_R }, uExposure: { value: 1.12 },
+  uTwinkle: { value: 1 }, uStarLow: { value: 0.035 },
   uMoonMap: { value: null }, uMoonReady: { value: 0 },
   uBalance: { value: new THREE.Vector3(1, 1, 1) }, uShadowTint: { value: new THREE.Vector3(1, 1, 1) },
   uHighTint: { value: new THREE.Vector3(1, 1, 1) }, uShadowAmt: { value: 0 }, uHighAmt: { value: 0 },
@@ -2184,6 +2237,15 @@ function buildPanel() {
       <div class="ends"><span>Rare</span><span>Frequent</span></div>
     </div>
     <div class="foot" style="margin-top:6px"><span>L sends a flash now</span><button type="button" id="w-now">Flash now</button></div>`;
+  html += `<div class="sec">Sky</div>
+    <div class="row"><label for="s-twinkle">Twinkle</label><output id="s-twinkle-v"></output>
+      <div class="ctl"><input type="range" id="s-twinkle" min="0" max="2" step="0.05"></div>
+      <div class="ends"><span>Steady</span><span>Strong</span></div>
+    </div>
+    <div class="row"><label for="s-low">Stars reach down to</label><output id="s-low-v"></output>
+      <div class="ctl"><input type="range" id="s-low" min="0" max="0.35" step="0.005"></div>
+      <div class="ends"><span>Horizon</span><span>Higher</span></div>
+    </div>`;
   html += `<div class="sec">Performance</div>
     <div class="stats" aria-live="off">
       <span>Clouds</span><b id="q-cloud">–</b>
@@ -2213,6 +2275,7 @@ gradeBody.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.id === 'w-on' || t.id === 'w-rate') { onStormInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low') { onSkyInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
@@ -2324,6 +2387,29 @@ function flashNow() {
   startFlash(pickKind());
 }
 syncStorm();
+
+/* ---------------------------------------------------------------------------
+   Sky: how much the stars twinkle and how close to the horizon they reach,
+   saved per viewer
+--------------------------------------------------------------------------- */
+const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
+let sky = { twinkle: 1, low: 0.035 };
+try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = k; } catch (e) {}
+const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
+const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
+function syncSky() {
+  sTw.value = sky.twinkle; sLow.value = sky.low;
+  sTwV.textContent = sky.twinkle === 0 ? 'off' : '×' + (+sky.twinkle).toFixed(2);
+  sLowV.textContent = (Math.asin(Math.min(sky.low, 1)) * 180 / Math.PI).toFixed(1) + '° up';
+  compPass.u.uTwinkle.value = sky.twinkle;
+  compPass.u.uStarLow.value = sky.low;
+}
+function onSkyInput(t) {
+  if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value); else sky.low = parseFloat(t.value);
+  try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
+  syncSky();
+}
+syncSky();
 
 /* ---------------------------------------------------------------------------
    Full screen
