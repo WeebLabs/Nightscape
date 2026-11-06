@@ -11,6 +11,7 @@ Everything is in a single self-contained file, `index.html`. Open it in a curren
 | Mouse | Gently turns your gaze (heavily damped) |
 | Double-click / `F` | Toggle full screen |
 | `G` or the corner button | Open the colour-grade panel |
+| `L` | Send a lightning flash now |
 | `Esc` | Close the panel |
 
 The cursor and the closed panel button fade out after a couple of seconds without mouse movement.
@@ -27,16 +28,26 @@ The cursor and the closed panel button fade out after a couple of seconds withou
 
 **Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map (public domain), embedded in the page. You see the real near side, north up, with the maria and Tycho in their correct places. A layered halo surrounds it. The sky is a deep gradient with a warm glow along the horizon under the moon, and procedural twinkling stars that fade near the moon's glare and the horizon.
 
+**Lightning.** Every several seconds one of the cumulonimbus near the camera flashes. About a third of the flashes are ground strikes and the rest stay in the cloud.
+
+- **Ground strikes** have a faint stepped leader that works its way down, then one to four return strokes tens of milliseconds apart. Some strokes carry a flickering continuing current. Some strikes leave the cloud base and show only through breaks in the deck. Others leave the side of the tower and arc through clear air before dropping to the sea, which is known as a "bolt from the blue". Before a strike is chosen, ten candidate channels are tested against the baked cloud field, and the one the camera sees best wins.
+- **In-cloud flashes** fire between charge regions inside the tower as a train of pulses that wander along the channel. On the tall towers with an anvil, some run as "crawlers" just under the anvil base.
+- **Cloud lighting.** Each flash also acts as two line lights along its channel inside the cloud ray march. Light from a channel buried in cloud is scattered many times before it escapes, so it fades far more gently than direct moonlight. Three reads of the bake estimate how much cloud lies in between. The result is a hot spot near the channel that spreads through the whole tower. A ground strike also lights the sea around its strike point and the rainy air under the deck.
+- **The bolt** is drawn at full resolution as a jagged, branching channel made by midpoint displacement. Each point of the channel marches the baked cloud field back to the camera, so cloud in front hides it and thin cloud only veils it.
+- Storms often flash in quick bursts, so there's a 30% chance that the next flash follows within two seconds, usually from the same tower.
+- The panel's Weather section turns lightning off or makes it rarer or more frequent. These settings are saved in the browser. With "reduce motion" set in the operating system, flashes are softer and single, with no rapid flicker.
+
 **Light shafts.** A screen-space radial pass streaks moonlight past whatever is occluding the moon, so beams fan out when a tower crosses it. It also picks up the brightest silver linings.
 
 ## How it renders
 
-Each frame runs four full-screen passes:
+Each frame runs four full-screen passes, plus a fifth while a lightning bolt is visible:
 
 1. **Cloud pass** (reduced resolution). Ray-marches the cloud volume per pixel and outputs scattered light, transmittance and a depth estimate.
 2. **Temporal accumulation.** Blends the new frame with the reprojected history to remove residual noise and stabilise edges.
 3. **Light shafts.** Radial blur toward the moon's screen position.
-4. **Composite** (full resolution). Draws the sky, stars and moon, combines them with the clouds and shafts, then applies tone mapping and the colour grade.
+4. **Lightning bolt** (full resolution, only during a flash). Draws the channel as screen-facing strips into its own buffer.
+5. **Composite** (full resolution). Draws the sky, stars and moon, combines them with the clouds and shafts, then applies tone mapping and the colour grade.
 
 ### The world is one seamless tile
 
@@ -118,6 +129,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 12. **Colour grade.** Teal Night became the default, with the preset and control panel added.
 13. **Performance readout.** The panel shows the live resolution and frame rate and can pin the cloud resolution.
 14. **Baked cloud shape.** Rendering reads a baked copy of the cloud field plus live fine detail, about 5.5× faster per frame in testing, with matching appearance.
+15. **Lightning.** Ground strikes and in-cloud flashes from the cumulonimbus, with matching cloud, sea and sky lighting. A held flash adds well under a millisecond per frame in testing.
 
 ## Known limitations and ideas
 

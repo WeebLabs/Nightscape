@@ -120,7 +120,7 @@
 </style>
 </head>
 <body>
-<div id="hint">Double-click for full screen · G for colour grade</div>
+<div id="hint">Double-click for full screen · G for colour grade · L for lightning</div>
 <div id="status">Lighting the clouds…</div>
 <div id="grade" aria-label="Colour grade controls">
   <button class="toggle" type="button" aria-expanded="false" aria-controls="grade-body" title="Colour grade (G)">
@@ -465,6 +465,52 @@ float sceneSDFull(vec3 p){
 float densLight(float sd){ return clamp((sd + 0.1) * 1.3, 0.0, 1.0); }
 `;
 
+// Cloud shape at render time: the baked field (deck, heaps and cumulonimbus with their
+// large billows) plus one octave of finer live billowing for the small cauliflower detail.
+const BAKED = `
+uniform sampler3D uBake;
+float bakedSD(vec3 p){
+  float w = (p.y - Y_MIN) / (Y_MAX - Y_MIN);
+  if (w >= 1.0) return -4.0 - (p.y - Y_MAX);
+  if (w < 0.0) return -6.0;                  // below the deck: clear air down to the sea
+  return texture(uBake, vec3(p.x / TILE, p.z / TILE, w)).b * 16.0 - 10.0;
+}
+float shapeSD(vec3 p){
+  float sd = bakedSD(p);
+  if (sd < -1.2) return sd + 0.6;            // well clear of cloud: a safe bound, no detail needed
+  vec3 q = p * F_BIL;
+  q = vec3(2.0 * q.x + q.z, 2.0 * q.y, 2.0 * q.z - q.x) + 0.37;   // the billow octave the bake can only half resolve
+  return sd + (texture(uNoise, q).r - 0.5) * 0.9;
+}
+`;
+
+// Lightning as light: each flash is two line lights along the channel. Light from a
+// line inside a cloud is scattered many times before it escapes, so it is attenuated far
+// more gently than direct moonlight; three baked samples estimate the cloud in between.
+const LIGHTNING = `
+uniform float uFlash, uLR2;
+uniform vec3 uLa0, uLb0, uLa1, uLb1, uGround;
+uniform float uLi0, uLi1, uGroundI;
+const vec3 LCOL = vec3(0.80, 0.84, 1.00);
+vec3 segPoint(vec3 p, vec3 a, vec3 b){
+  vec3 ab = b - a;
+  return a + ab * clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+}
+float boltLight(vec3 p, vec3 a, vec3 b, float I){
+  if (I <= 0.0) return 0.0;
+  vec3 v = segPoint(p, a, b) - p;
+  float d2 = dot(v, v);
+  if (d2 > uLR2) return 0.0;
+  float d = sqrt(d2);
+  float od = densLight(bakedSD(p + v * 0.12)) * 0.25 + densLight(bakedSD(p + v * 0.4)) * 0.35
+           + densLight(bakedSD(p + v * 0.75)) * 0.4;
+  return I * exp(-od * d * 0.2 - d * 0.03) / (1.0 + d2 * 0.06);
+}
+vec3 lightningAt(vec3 p){
+  return LCOL * (boltLight(p, uLa0, uLb0, uLi0) + boltLight(p, uLa1, uLb1, uLi1));
+}
+`;
+
 // Baked lighting: for every point of the tile, how much cloud lies between it
 // and the moon (R) and between it and the open sky above (G).
 const BAKE_N = (DBG && DBG.bakeN) || 256, BAKE_NY = 96, BAKE_COLS = 8, BAKE_ROWS = 12;
@@ -515,22 +561,9 @@ const vec3 MOON_WARM = vec3(1.00, 0.88, 0.70);
 const vec3 AMB_LO = vec3(0.0060, 0.0085, 0.0170);
 const vec3 AMB_HI = vec3(0.040, 0.060, 0.118);
 ${WORLD}
-uniform sampler3D uBake;
+${BAKED}
+${LIGHTNING}
 // optical depth toward the moon (x) and toward the sky above (y), from the bake
-// Cloud shape at render time: the baked field (deck, heaps and cumulonimbus with their
-// large billows) plus one octave of finer live billowing for the small cauliflower detail.
-float bakedSD(vec3 p){
-  float w = (p.y - Y_MIN) / (Y_MAX - Y_MIN);
-  if (w >= 1.0) return -4.0 - (p.y - Y_MAX);
-  return texture(uBake, vec3(p.x / TILE, p.z / TILE, w)).b * 16.0 - 10.0;
-}
-float shapeSD(vec3 p){
-  float sd = bakedSD(p);
-  if (sd < -1.2) return sd + 0.6;            // well clear of cloud: a safe bound, no detail needed
-  vec3 q = p * F_BIL;
-  q = vec3(2.0 * q.x + q.z, 2.0 * q.y, 2.0 * q.z - q.x) + 0.37;   // the billow octave the bake can only half resolve
-  return sd + (texture(uNoise, q).r - 0.5) * 0.9;
-}
 vec2 baked(vec3 p){
   vec4 b = texture(uBake, vec3(p.x / TILE, p.z / TILE, (p.y - Y_MIN) / (Y_MAX - Y_MIN)));
   return vec2(-log(max(1.0 - b.r, 2e-3)) * 4.0, -log(max(1.0 - b.g, 2e-3)) * 2.5);
@@ -601,7 +634,16 @@ vec3 oceanView(vec3 ro, vec3 rd, float cosT){
   // the dim air between deck and sea
   float haze = 1.0 - exp(-(tp - (Y_MIN - ro.y) / rd.y) * 0.0075);
   vec3 hazeC = vec3(0.0035, 0.006, 0.014) + MOON_COOL * 0.012 * pow(max(cosT, 0.0), 6.0);
-  return mix(col, hazeC, haze * 0.8);
+  vec3 glow = vec3(0.0);
+  if (uFlash > 0.0){
+    // a ground strike lights the sea around it and the rainy air under the deck
+    float dg = length(po.xz - uGround.xz);
+    col += LCOL * uGroundI * 0.006 / (1.0 + dg * dg * 0.006);
+    vec3 pm = ro + rd * ((0.5 * (OCEAN_Y + Y_MIN) - ro.y) / rd.y);
+    vec3 v = segPoint(pm, uLa1, uLb1) - pm;
+    glow = LCOL * uLi1 * 0.03 / (1.0 + dot(v, v) * 0.008);
+  }
+  return mix(col, hazeC, haze * 0.8) + glow;
 }
 
 void main(){
@@ -674,6 +716,7 @@ void main(){
       float occ = exp(-max(sd, 0.0) * 0.5) * mix(0.15, 1.0, exp(-lt.y * 0.5));
       vec3 amb = mix(AMB_LO, AMB_HI, sqrt(hgt)) * (0.28 + 0.72 * occ);
       vec3 L = lightCol * (MOON_I * e * pf) + amb;
+      if (uFlash > 0.0) L += lightningAt(p);
       float fogA = 1.0 - exp(-t * 0.016 * mix(1.0, 0.3, smoothstep(4.0, 30.0, p.y)));
       L = mix(L, fogC, fogA);
       float tr = exp(-d * SIG * dtW);
@@ -710,7 +753,7 @@ precision highp float;
 precision highp sampler3D;
 uniform sampler2D tCloud;
 uniform vec2 uMoonUV;
-uniform float uAspect, uMoonRuv, uFrame, uFade;
+uniform float uAspect, uMoonRuv, uFrame, uFade, uLumW;
 varying vec2 vUv;
 ${COMMON}
 void main(){
@@ -725,7 +768,7 @@ void main(){
     float r = length((s - uMoonUV) * vec2(uAspect, 1.0)) / uMoonRuv;
     float src = c.a * (smoothstep(1.25, 0.75, r) + 0.32 * exp(-r * 0.75) + 0.025 * exp(-r * 0.28));
     float lum = dot(c.rgb, vec3(0.3, 0.5, 0.2));
-    src += max(lum - 0.42, 0.0) * 0.5;
+    src += max(lum - 0.42, 0.0) * uLumW;   // silver linings (muted during a lightning flash)
     sum += src * decay;
     decay *= 0.974;
     s += delta;
@@ -788,8 +831,10 @@ void main(){
 const COMPOSITE_FRAG = `
 precision highp float;
 precision highp sampler3D;
-uniform sampler2D tCloud, tRays;
+uniform sampler2D tCloud, tRays, tBolt;
 uniform sampler3D uNoise;
+uniform float uBoltOn;
+uniform vec3 uSkyFlash, uFlashDir;
 uniform vec2 uCloudTexel, uRes;
 uniform vec3 uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime, uFrame, uPixAng, uMoonR, uExposure, uMoonReady;
@@ -861,6 +906,13 @@ void main(){
   vec3 sky = skyBase(rd, m) * (1.0 - 0.82 * diskMask) + stars(rd) * starVis + moonDisk(rd, m);
 
   vec3 col = c.rgb + sky * c.a;
+  // lightning: the bolt itself (already hidden by the clouds in front of it), and a
+  // faint brightening of the open air around the flash
+  if (uBoltOn > 0.0){
+    col += texture2D(tBolt, vUv).rgb * 32.0;
+    float fa = max(dot(rd, uFlashDir), 0.0);
+    col += uSkyFlash * c.a * (0.2 + 0.8 * fa * fa * fa * fa);
+  }
   float rays = texture2D(tRays, vUv).r;
   col += rays * vec3(0.74, 0.80, 0.95) * 0.6 * uRays * (1.0 - 0.8 * diskMask * c.a);
 
@@ -883,6 +935,89 @@ void main(){
   float gr = hash12(gl_FragCoord.xy + fract(uTime * 7.31) * 513.0) - 0.5;
   col += gr * uGrain;                                // film grain + dither
   gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// Lightning channels, drawn at full resolution as strips that face the screen. Each
+// vertex marches the baked cloud field back to the camera, so cloud in front hides
+// the bolt and thin cloud only veils it.
+const BOLT_VERT = `
+precision highp float;
+precision highp sampler3D;
+uniform sampler3D uNoise;
+uniform vec3 uCamPos, uCamR, uCamU, uCamF;
+uniform float uTanHalf, uAspect, uPx;
+uniform vec2 uRes;
+attribute vec3 aA, aB;
+attribute vec4 aInfo;     // path time at A, path time at B, weight, 1 for a branch
+attribute vec2 aCorner;   // x: side (-1 / +1), y: 0 at A, 1 at B
+varying vec2 vSA, vSB;
+varying vec4 vInfo;
+varying float vTr, vHW;
+${COMMON}
+${WORLD}
+${BAKED}
+vec3 proj(vec3 X){
+  vec3 v = X - uCamPos;
+  float z = dot(v, uCamF);
+  return vec3(dot(v, uCamR) / (z * uTanHalf * uAspect), dot(v, uCamU) / (z * uTanHalf), z);
+}
+float sight(vec3 P){
+  vec3 v = P - uCamPos;
+  float dist = length(v);
+  vec3 rd = v / dist;
+  float t = 0.3, od = 0.0;
+  bool done = false;
+  for (int i = 0; i < 240; i++){
+    if (t >= dist || od > 2.5){ done = true; break; }
+    vec3 p = uCamPos + rd * t;
+    if ((p.y < Y_MIN && rd.y < 0.0) || (p.y > Y_MAX && rd.y > 0.0)){ done = true; break; }
+    float sd = shapeSD(p);
+    if (sd < -0.32){ t += max(-sd * 0.5, 0.25); continue; }
+    float st = 0.3 + t * 0.002;
+    od += clamp((sd + 0.14) * 2.0, 0.0, 1.0) * min(st, dist - t);
+    t += st;
+  }
+  if (!done) return 0.0;                     // ran out of steps inside cloud: treat as hidden
+  return exp(-od * 4.0) * exp(-dist * 0.006);
+}
+void main(){
+  vec3 pa = proj(aA), pb = proj(aB);
+  if (pa.z < 0.3 || pb.z < 0.3){ gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  vec2 sa = (pa.xy * 0.5 + 0.5) * uRes, sb = (pb.xy * 0.5 + 0.5) * uRes;
+  vec2 d = sb - sa;
+  float l = length(d);
+  d = l > 1e-3 ? d / l : vec2(1.0, 0.0);
+  vec2 n = vec2(-d.y, d.x);
+  float hw = (5.0 + 9.0 * aInfo.z) * uPx;       // half width in device pixels: room for the glow
+  vec2 s = mix(sa, sb, aCorner.y) + n * aCorner.x * hw + d * (aCorner.y * 2.0 - 1.0) * hw;
+  gl_Position = vec4(s / uRes * 2.0 - 1.0, 0.0, 1.0);
+  vSA = sa; vSB = sb; vInfo = aInfo; vHW = hw;
+  vTr = sight(aCorner.y > 0.5 ? aB : aA);
+}
+`;
+const BOLT_FRAG = `
+precision highp float;
+uniform float uProg, uMainE, uBranchE, uLeaderE, uPx;
+varying vec2 vSA, vSB;
+varying vec4 vInfo;
+varying float vTr, vHW;
+void main(){
+  vec2 ab = vSB - vSA;
+  vec2 fp = gl_FragCoord.xy - vSA;
+  float h = clamp(dot(fp, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+  float dpx = length(fp - ab * h);
+  if (dpx > vHW) discard;
+  float s = mix(vInfo.x, vInfo.y, h);
+  if (s > uProg) discard;                       // the leader hasn't got this far yet
+  float w = vInfo.z;
+  float e = (vInfo.w > 0.5 ? uBranchE : uMainE) * w;
+  e += uLeaderE * (0.15 + 1.6 * exp(-(uProg - s) * 25.0)) * mix(0.4, 1.0, w);   // faint stepped leader, brightest at its tip
+  float cw = (0.45 + 0.75 * w) * uPx;
+  float core = exp(-dpx * dpx / (cw * cw));
+  float halo = exp(-dpx / ((1.2 + 2.6 * w) * uPx)) * (1.0 - dpx / vHW);
+  vec3 col = vec3(1.0, 0.97, 1.0) * core * 24.0 + vec3(0.42, 0.50, 1.0) * halo * 1.4;
+  gl_FragColor = vec4(col * e * vTr / 32.0, 1.0);
 }
 `;
 
@@ -927,7 +1062,14 @@ const bakeTex = (function () {
   t.generateMipmaps = false; t.unpackAlignment = 1;
   return t;
 })();
-const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Object.assign({ uNoise: { value: noiseTex }, uBake: { value: bakeTex } }, camU));
+// lightning as light in the cloud pass (two line lights, set each frame)
+const lightU = {
+  uFlash: { value: 0 }, uLR2: { value: 0 },
+  uLa0: { value: new THREE.Vector3() }, uLb0: { value: new THREE.Vector3() }, uLi0: { value: 0 },
+  uLa1: { value: new THREE.Vector3() }, uLb1: { value: new THREE.Vector3() }, uLi1: { value: 0 },
+  uGround: { value: new THREE.Vector3() }, uGroundI: { value: 0 }
+};
+const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Object.assign({ uNoise: { value: noiseTex }, uBake: { value: bakeTex } }, camU, lightU));
 const taaPass = makePass(TAA_FRAG, {
   tCur: { value: null }, tHist: { value: null }, uSize: { value: new THREE.Vector2() },
   uCamPos: camU.uCamPos, uCamR: camU.uCamR, uCamU: camU.uCamU, uCamF: camU.uCamF,
@@ -938,7 +1080,7 @@ const taaPass = makePass(TAA_FRAG, {
 });
 const raysPass = makePass(RAYS_FRAG, {
   tCloud: { value: null }, uMoonUV: { value: new THREE.Vector2() }, uAspect: camU.uAspect,
-  uMoonRuv: { value: 0.05 }, uFrame: camU.uFrame, uFade: { value: 0 }
+  uMoonRuv: { value: 0.05 }, uFrame: camU.uFrame, uFade: { value: 0 }, uLumW: { value: 0.5 }
 });
 const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   tCloud: { value: null }, tRays: { value: null }, uNoise: { value: noiseTex },
@@ -948,7 +1090,8 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   uBalance: { value: new THREE.Vector3(1, 1, 1) }, uShadowTint: { value: new THREE.Vector3(1, 1, 1) },
   uHighTint: { value: new THREE.Vector3(1, 1, 1) }, uShadowAmt: { value: 0 }, uHighAmt: { value: 0 },
   uLift: { value: 0 }, uSat: { value: 1 }, uContrast: { value: 1 }, uVignette: { value: 0.38 },
-  uGrain: { value: 0.007 }, uRays: { value: 1 }
+  uGrain: { value: 0.007 }, uRays: { value: 1 },
+  tBolt: { value: null }, uBoltOn: { value: 0 }, uSkyFlash: { value: new THREE.Vector3() }, uFlashDir: { value: new THREE.Vector3(0, 1, 0) }
 }, camU));
 
 // NASA LRO lunar albedo map (public domain), 512 x 256, embedded
@@ -988,6 +1131,7 @@ function resizeTargets() {
 function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   resizeTargets();
+  if (boltRT) sizeBoltRT();
 }
 window.addEventListener('resize', onResize);
 resizeTargets();
@@ -1080,6 +1224,386 @@ function bakeStep() {
   baked = true;
   status.classList.remove('on');
 }
+/* ---------------------------------------------------------------------------
+   Lightning: occasional ground strikes and in-cloud flashes from the cumulonimbus.
+   The cumulonimbus layout is rebuilt here with the same hashes the shader uses, and
+   the baked cloud field (kept on the CPU after the bake) says what the camera can
+   see, so ground strikes favour channels that actually show.
+--------------------------------------------------------------------------- */
+const LT = { TILE: 320, BASE: -1.75, OCEAN: -85, YMIN: -8.5, YMAX: 52, WX: 0.8, WZ: -0.6, K: 20 };
+const f32 = Math.fround;
+const fract = x => x - Math.floor(x);
+const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+const rnd = Math.random;
+const vadd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const vsub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vmul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const vdot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vlen = a => Math.sqrt(vdot(a, a));
+const vnorm = a => vmul(a, 1 / Math.max(vlen(a), 1e-6));
+const vmix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const vrand = () => { let v; do { v = [rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]; } while (vdot(v, v) > 1 || vdot(v, v) < 1e-3); return vnorm(v); };
+const disk = r => { const a = rnd() * 6.2832, d = r * Math.sqrt(rnd()); return [Math.cos(a) * d, Math.sin(a) * d]; };
+
+// the shader's hash42 / hash12, in 32-bit float steps so the layout matches the GPU's
+function hash42js(x, y) {
+  const a = fract(f32(x * f32(0.1031))), b = fract(f32(y * f32(0.1030))), c = fract(f32(x * f32(0.0973))), d = fract(f32(y * f32(0.1099)));
+  const k = f32(a * (d + 33.33) + b * (c + 33.33) + c * (a + 33.33) + d * (b + 33.33));
+  const X = a + k, Y = b + k, Z = c + k, W = d + k;
+  return [fract(f32((X + Y) * Z)), fract(f32((X + Z) * Y)), fract(f32((Y + Z) * W)), fract(f32((Z + W) * X))];
+}
+function hash12js(x, y) {
+  const a = fract(f32(x * f32(0.1031))), b = fract(f32(y * f32(0.1031)));
+  const k = f32(a * (b + 33.33) + b * (a + 33.33) + a * (a + 33.33));
+  return fract(f32((a + k + b + k) * (a + k)));
+}
+const pdistJS = a => Math.abs((((a + 160) % 320) + 320) % 320 - 160);
+const CBS = [];
+for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) {
+  const h = hash42js(f32(i * 7.31 + 113.7), f32(j * 7.31 + 113.7));
+  if (h[0] < 0.55) continue;
+  const cx = (i + 0.3 + 0.4 * h[1]) * (LT.TILE / 3), cz = (j + 0.3 + 0.4 * h[2]) * (LT.TILE / 3);
+  const R0 = 9 + 6 * h[3];
+  if (pdistJS(cx - pathX(cz)) < R0 * 2.2 + 9) continue;
+  const h2 = hash12js(f32(i * 3.17 + 41.3), f32(j * 3.17 + 41.3));
+  const H = 16 + 30 * h2 * h2;
+  CBS.push({ cx, cz, R0, H, anvil: smooth(24, 34, H), A: 4 + 4 * fract(h2 * 7.13), Ra: R0 * (1.6 + 0.8 * fract(h2 * 13.7)) });
+}
+// centre of a cumulonimbus column at height y (it leans downwind as it climbs)
+function colAt(cb, y) {
+  const tt = Math.min(Math.max((y - LT.BASE) / (cb.H - LT.BASE), 0), 1);
+  return [cb.x + LT.WX * tt * tt * cb.R0 * 0.7, y, cb.z + LT.WZ * tt * tt * cb.R0 * 0.7];
+}
+// the baked cloud shape, read on the CPU (nearest texel)
+function sdAt(p) {
+  if (p[1] >= LT.YMAX) return -4 - (p[1] - LT.YMAX);
+  if (p[1] < LT.YMIN) return -6;
+  const N = BAKE_N, d = bakeTex.image.data;
+  const i = ((Math.floor(p[0] / LT.TILE * N) % N) + N) % N;
+  const j = ((Math.floor(p[2] / LT.TILE * N) % N) + N) % N;
+  const k = Math.min(BAKE_NY - 1, Math.floor((p[1] - LT.YMIN) / (LT.YMAX - LT.YMIN) * BAKE_NY));
+  return d[((k * N + j) * N + i) * 4 + 2] / 255 * 16 - 10;
+}
+// how much of a point the camera can see through the clouds
+function sightCPU(a, b) {
+  const v = vsub(b, a), L = vlen(v), rd = vmul(v, 1 / L);
+  let t = 0.5, od = 0;
+  while (t < L && od < 1.5) {
+    const p = vadd(a, vmul(rd, t));
+    if ((p[1] < LT.YMIN && rd[1] < 0) || (p[1] > LT.YMAX && rd[1] > 0)) break;
+    const sd = sdAt(p);
+    if (sd < -0.5) { t += Math.max(-sd * 0.6, 0.4); continue; }
+    od += Math.min(Math.max((sd + 0.14) * 2, 0), 1) * 0.4;
+    t += 0.4;
+  }
+  return Math.exp(-od * 4) * (L < 230 ? 1 : 0.3);
+}
+const camPos = () => { const c = camU.uCamPos.value; return [c.x, c.y, c.z]; };
+
+// A jagged channel by midpoint displacement: every level kinks each piece sideways
+// by a similar fraction of its length, which gives lightning its fractal look.
+function jagged(a, b, rough, minLen) {
+  let pts = [a, b];
+  for (let lev = 0; lev < 9 && vlen(vsub(pts[1], pts[0])) > minLen; lev++) {
+    const out = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p = pts[i], q = pts[i + 1], d = vsub(q, p), l = vlen(d);
+      let r = vrand();
+      r = vnorm(vsub(r, vmul(d, vdot(r, d) / (l * l))));
+      out.push(vadd(vmix(p, q, 0.4 + rnd() * 0.2), vmul(r, (rnd() + rnd() - 1) * l * rough)), q);
+    }
+    pts = out;
+  }
+  return pts;
+}
+// a polyline with "path time": how long the leader takes to get to each point
+function chain(pts, s0, ref, w, br) {
+  const s = [s0];
+  for (let i = 1; i < pts.length; i++) s.push(s[i - 1] + vlen(vsub(pts[i], pts[i - 1])) / ref);
+  return { pts, s, w, br, ref, len: (s[s.length - 1] - s0) * ref };
+}
+function addBranches(line, n, o, depth, out) {
+  const P = line.pts, m = P.length;
+  for (let b = 0; b < n; b++) {
+    const i = Math.min(m - 2, Math.floor((o.lo + rnd() * (o.hi - o.lo)) * (m - 1)));
+    const d0 = vnorm(vsub(P[Math.min(m - 1, i + 4)], P[Math.max(0, i - 4)]));
+    const r = vrand(); r[1] *= o.flat;
+    const dir = vnorm(vadd(vadd(d0, vmul(r, o.spread)), o.bias));
+    const L = line.len * (o.lf[0] + rnd() * (o.lf[1] - o.lf[0]));
+    const br = chain(jagged(P[i], vadd(P[i], vmul(dir, L)), 0.3, 0.45), line.s[i], line.ref, line.w * (0.25 + rnd() * 0.3), 1);
+    out.push(br);
+    if (depth > 0) addBranches(br, Math.floor(rnd() * 3), Object.assign({}, o, { lo: 0.15, hi: 0.8, lf: [0.15, 0.45] }), depth - 1, out);
+  }
+}
+
+function pickStorm(prefer) {
+  const cam = camPos(), f = camU.uCamF.value;
+  const fl = Math.hypot(f.x, f.z) || 1;
+  let list = [], sum = 0;
+  for (const cb of CBS) {
+    let dx = cb.cx - cam[0], dz = cb.cz - cam[2];
+    dx -= LT.TILE * Math.round(dx / LT.TILE); dz -= LT.TILE * Math.round(dz / LT.TILE);
+    const d = Math.hypot(dx, dz);
+    if (d > 260 || d < cb.R0 + 6) continue;
+    const front = (dx * f.x + dz * f.z) / (d * fl);
+    let w = (front > 0.6 ? 1 : front > 0.2 ? 0.4 : 0.06) * (0.2 + smooth(16, 34, cb.H)) * (d < 210 ? 1 : 0.4);
+    const s = Object.assign({}, cb, { x: cam[0] + dx, z: cam[2] + dz, key: cb.cx + ',' + cb.cz });
+    if (prefer && s.key === prefer) w *= 8;
+    list.push([w, s]); sum += w;
+  }
+  let r = rnd() * sum;
+  for (const [w, s] of list) { r -= w; if (r <= 0) return s; }
+  return null;
+}
+// a point well inside the cloud near a target, or the target itself
+function inside(p, r) {
+  for (let k = 0; k < 12; k++) {
+    const d = disk(r), q = [p[0] + d[0], p[1] + (rnd() - 0.5) * r * 0.3, p[2] + d[1]];
+    if (sdAt(q) > 0.6) return q;
+  }
+  return p;
+}
+
+// Ground strike. Some come out of the cloud base and show through breaks in the deck;
+// others leave the side of the tower and arc out through clear air before they drop
+// (a "bolt from the blue"). Of ten tries of either kind, the one the camera sees best wins.
+function buildCG(cb) {
+  const cam = camPos(), span = cb.H - LT.BASE;
+  let best = null;
+  for (let c = 0; c < 10; c++) {
+    const side = c % 2 === 1;
+    const O = inside(colAt(cb, LT.BASE + (side ? 0.45 + 0.3 * rnd() : 0.2 + 0.2 * rnd()) * span), cb.R0 * 0.45);
+    let X, G, check = [];
+    const a = rnd() * 6.2832, dir = [Math.cos(a), 0, Math.sin(a)];
+    if (side) {
+      const y = O[1] - rnd() * 0.15 * span, c0 = colAt(cb, y);
+      let r = cb.R0 * 0.5;
+      while (r < cb.R0 * 3 && sdAt([c0[0] + dir[0] * r, y, c0[2] + dir[2] * r]) > -1.2) r += 0.8;
+      r += 2 + rnd() * 9;
+      X = [c0[0] + dir[0] * r, y, c0[2] + dir[2] * r];
+      const g = disk(cb.R0 * 0.5), out = rnd() * cb.R0 * 0.7;
+      G = [X[0] + dir[0] * out + g[0], LT.OCEAN, X[2] + dir[2] * out + g[1]];
+      for (let k = 1; k <= 3; k++) check.push(vmix(O, X, 0.4 + 0.2 * k));
+      for (let k = 1; k <= 5; k++) check.push(vmix(X, G, k * 0.08));
+    } else {
+      const r = cb.R0 * (0.2 + 0.7 * rnd());
+      X = [cb.x + dir[0] * r, LT.BASE - 3 - rnd() * 2, cb.z + dir[2] * r];
+      const g = disk(cb.R0 * 0.9);
+      G = [X[0] + g[0], LT.OCEAN, X[2] + g[1]];
+      for (let k = 1; k <= 6; k++) check.push(vmix(X, G, 0.08 + k * 0.13));
+    }
+    let vis = 0;
+    for (const p of check) vis += sightCPU(cam, p);
+    const score = vis / check.length + rnd() * 0.04;
+    if (!best || score > best.score) best = { O, X, G, score };
+  }
+  const { O, X, G } = best;
+  const leg1 = jagged(O, X, 0.3, 0.45), leg2 = jagged(X, G, 0.27, 0.45);
+  const pts = leg1.concat(leg2.slice(1));
+  let ref = 0;
+  for (let i = 1; i < pts.length; i++) ref += vlen(vsub(pts[i], pts[i - 1]));
+  const main = chain(pts, 0, ref, 1, 0);
+  const lines = [main];
+  addBranches(main, 5 + Math.floor(rnd() * 6), { lo: 0.04, hi: 0.8, spread: 1.0, flat: 1, bias: [0, -0.35, 0], lf: [0.04, 0.18] }, 1, lines);
+  return { kind: 'cg', lines, seg0: [O, X], seg1: [X, G], ground: G, centre: vmix(O, X, 0.5), vis: best.score };
+}
+
+// Flash inside the cloud: between two charge regions of the tower, or (on the tall
+// ones with an anvil) a "crawler" that spreads along the underside of the anvil.
+function buildIC(cb, forceCrawl) {
+  const span = cb.H - LT.BASE;
+  let O, E, rough, br;
+  if ((forceCrawl || rnd() < 0.45) && cb.anvil > 0.5) {
+    // the anvil is centred downwind of the column; crawlers run just under its base
+    const y = cb.H - cb.A - 2.8 + rnd() * 1.6;
+    const ac = [cb.x + LT.WX * (cb.Ra - cb.R0) * 0.6, y, cb.z + LT.WZ * (cb.Ra - cb.R0) * 0.6];
+    const a0 = rnd() * 6.2832, d0 = cb.Ra * 0.35 * rnd();
+    O = [ac[0] + Math.cos(a0) * d0, y, ac[2] + Math.sin(a0) * d0];
+    const a = a0 + Math.PI + (rnd() - 0.5) * 1.6;
+    const L = cb.Ra * (0.6 + 0.5 * rnd());
+    E = [O[0] + Math.cos(a) * L, y + (rnd() - 0.5) * 1.2, O[2] + Math.sin(a) * L];
+    rough = 0.24;
+    br = { n: 10 + Math.floor(rnd() * 9), o: { lo: 0.05, hi: 0.95, spread: 1.4, flat: 0.15, bias: [0, -0.05, 0], lf: [0.08, 0.3] }, depth: 2 };
+  } else {
+    const yA = LT.BASE + (0.3 + 0.3 * rnd()) * span;
+    O = inside(colAt(cb, yA), cb.R0 * 0.5);
+    const a = rnd() * 6.2832, yE = yA + (rnd() - 0.25) * 0.3 * span, c = colAt(cb, yE), r = cb.R0 * (0.5 + 0.6 * rnd());
+    E = [c[0] + Math.cos(a) * r, yE, c[2] + Math.sin(a) * r];
+    rough = 0.36;
+    br = { n: 6 + Math.floor(rnd() * 7), o: { lo: 0.05, hi: 0.95, spread: 1.3, flat: 0.6, bias: [0, 0.05, 0], lf: [0.1, 0.35] }, depth: 1 };
+  }
+  const pts = jagged(O, E, rough, 0.45);
+  const main = chain(pts, 0, vlen(vsub(E, O)) * 1.4, 0.8, 0);
+  const lines = [main];
+  addBranches(main, br.n, br.o, br.depth, lines);
+  return { kind: 'ic', lines, seg0: [O, E], seg1: [O, E], ground: E, centre: vmix(O, E, 0.5), vis: sightCPU(camPos(), vmix(O, E, 0.5)) };
+}
+
+// The flash over time. A ground strike has a faint stepped leader, then one to four
+// return strokes tens of milliseconds apart, some with a glowing continuing current.
+// An in-cloud flash is a train of pulses that wander along its channel.
+function timeline(kind, main) {
+  const strokes = [];
+  if (kind === 'cg') {
+    const lead = reduceMotion ? 0 : 0.08 + rnd() * 0.12;
+    const r = rnd(), n = reduceMotion ? 1 : (r < 0.3 ? 1 : r < 0.6 ? 2 : r < 0.85 ? 3 : 4);
+    let t = lead;
+    for (let k = 0; k < n; k++) {
+      strokes.push({ t, peak: reduceMotion ? 0.6 : (k ? 0.45 + rnd() * 0.45 : 1), tau: reduceMotion ? 0.14 : 0.035 + rnd() * 0.035,
+        cc: !reduceMotion && rnd() < 0.4 ? 0.1 + rnd() * 0.15 : 0, ccDur: 0.06 + rnd() * 0.2 });
+      t += 0.05 + rnd() * 0.09 + (strokes[k].cc ? strokes[k].ccDur : 0);
+    }
+    return { strokes, lead, dur: t + 0.5 };
+  }
+  const n = reduceMotion ? 1 + Math.floor(rnd() * 2) : 3 + Math.floor(rnd() * 6);
+  const dur = 0.3 + rnd() * 0.7;
+  const m = main.pts.length;
+  for (let k = 0; k < n; k++) {
+    const t = reduceMotion ? k * 0.5 : (k === 0 ? 0.02 : 0.03 + rnd() * dur);
+    const u = rnd(), w = 0.15 + rnd() * 0.25;
+    strokes.push({ t, peak: reduceMotion ? 0.5 : 0.3 + rnd() * 0.7, tau: reduceMotion ? 0.15 : 0.03 + rnd() * 0.06, cc: 0, ccDur: 0,
+      a: main.pts[Math.floor(Math.max(0, u - w) * (m - 1))], b: main.pts[Math.floor(Math.min(1, u + w) * (m - 1))] });
+  }
+  strokes.sort((p, q) => p.t - q.t);
+  return { strokes, lead: 0.15 + rnd() * 0.2, dur: strokes[strokes.length - 1].t + 0.45 };
+}
+function pulse(st, age, dt) {
+  let a = age - st.t;
+  if (a < 0) return 0;
+  if (a < dt) a = 0;                 // every stroke gets one frame at full brightness, even at low frame rates
+  let v = st.peak * Math.exp(-a / st.tau);
+  if (st.cc) v += st.cc * (a < st.ccDur ? 0.8 + 0.4 * rnd() : Math.exp(-(a - st.ccDur) / 0.06));
+  return v;
+}
+
+// the bolt geometry: one screen-facing strip per channel segment
+const boltMat = new THREE.ShaderMaterial({
+  vertexShader: BOLT_VERT, fragmentShader: BOLT_FRAG,
+  uniforms: Object.assign({
+    uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uRes: { value: new THREE.Vector2(1, 1) }, uPx: { value: DPR },
+    uProg: { value: 0 }, uMainE: { value: 0 }, uBranchE: { value: 0 }, uLeaderE: { value: 0 }
+  }, camU),
+  depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+  blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor
+});
+const boltScene = new THREE.Scene();
+let boltMesh = null, boltRT = null;
+function sizeBoltRT() {
+  const w = Math.round(window.innerWidth * DPR), h = Math.round(window.innerHeight * DPR);
+  if (boltRT) boltRT.dispose();
+  boltRT = makeRT(w, h, RT_TYPE, THREE.LinearFilter);
+  boltMat.uniforms.uRes.value.set(w, h);
+}
+function setBoltMesh(lines) {
+  if (boltMesh) { boltScene.remove(boltMesh); boltMesh.geometry.dispose(); boltMesh = null; }
+  if (!lines) return;
+  let ns = 0;
+  for (const l of lines) ns += l.pts.length - 1;
+  const A = new Float32Array(ns * 12), B = new Float32Array(ns * 12), I = new Float32Array(ns * 16), C = new Float32Array(ns * 8);
+  const idx = new Uint32Array(ns * 6);
+  let v = 0, q = 0;
+  for (const l of lines) for (let i = 0; i < l.pts.length - 1; i++) {
+    for (let c = 0; c < 4; c++) {
+      A.set(l.pts[i], (v + c) * 3); B.set(l.pts[i + 1], (v + c) * 3);
+      I.set([l.s[i], l.s[i + 1], l.w, l.br], (v + c) * 4);
+      C[(v + c) * 2] = (c & 1) ? 1 : -1; C[(v + c) * 2 + 1] = c >> 1;
+    }
+    idx.set([v, v + 1, v + 2, v + 2, v + 1, v + 3], q);
+    v += 4; q += 6;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(A, 3));
+  g.setAttribute('aA', new THREE.BufferAttribute(A, 3));
+  g.setAttribute('aB', new THREE.BufferAttribute(B, 3));
+  g.setAttribute('aInfo', new THREE.BufferAttribute(I, 4));
+  g.setAttribute('aCorner', new THREE.BufferAttribute(C, 2));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  boltMesh = new THREE.Mesh(g, boltMat);
+  boltMesh.frustumCulled = false;
+  boltScene.add(boltMesh);
+}
+
+let flash = null, nextFlash = 6 + rnd() * 6, lastStorm = null, burst = false;
+function startFlash(kind, opts) {
+  opts = opts || {};
+  const cb = pickStorm(burst ? lastStorm : null);
+  if (!cb) return null;
+  const crawl = kind === 'crawl';
+  const ev = kind === 'cg' ? buildCG(cb) : buildIC(cb, crawl);
+  Object.assign(ev, timeline(ev.kind, ev.lines[0]), { t0: clock, hold: opts.hold, cb });
+  setBoltMesh(ev.lines);
+  lastStorm = cb.key;
+  flash = ev;
+  return { kind: ev.kind, at: ev.centre.map(v => +v.toFixed(1)), visible: +ev.vis.toFixed(2), strokes: ev.strokes.length, segments: boltMesh.geometry.index.count / 6 };
+}
+function endFlash() {
+  flash = null;
+  setBoltMesh(null);
+  burst = rnd() < 0.3;                                  // storms often flash in quick bursts
+  const mean = 9 / Math.max(storm.rate, 0.05);
+  nextFlash = clock + (burst ? 0.5 + rnd() * 1.8 : Math.max(2.5, -Math.log(1 - rnd()) * mean));
+}
+const _fd = new THREE.Vector3();
+function updateLightning(dt) {
+  const L = lightU, cu = compPass.u;
+  if (!flash && storm.on && !DBG && clock >= nextFlash) {
+    if (!startFlash(rnd() < 0.36 ? 'cg' : 'ic')) nextFlash = clock + 1;
+  }
+  if (!flash) {
+    L.uFlash.value = 0; cu.uBoltOn.value = 0; raysPass.u.uLumW.value = 0.5;
+    return false;
+  }
+  const ev = flash, age = ev.hold !== undefined ? ev.hold : clock - ev.t0;
+  if (age > ev.dur) { endFlash(); return updateLightning(0); }
+  let env = 0, top = 0, topSt = null;
+  for (const st of ev.strokes) {
+    const v = pulse(st, age, dt);
+    env += v;
+    if (v > top) { top = v; topSt = st; }
+  }
+  const first = pulse(ev.strokes[0], age, dt);
+  const K = LT.K, bu = boltMat.uniforms;
+  if (ev.kind === 'cg') {
+    const leading = age < ev.lead;
+    bu.uProg.value = leading ? age / ev.lead : 10;
+    bu.uLeaderE.value = leading ? 0.06 : 0;
+    bu.uMainE.value = env;
+    bu.uBranchE.value = first * 0.6;
+    L.uLa0.value.fromArray(ev.seg0[0]); L.uLb0.value.fromArray(ev.seg0[1]);
+    L.uLa1.value.fromArray(ev.seg1[0]); L.uLb1.value.fromArray(ev.seg1[1]);
+    L.uLi0.value = (env + (leading ? 0.02 : 0)) * K * 0.8;
+    L.uLi1.value = env * K;
+    L.uGround.value.fromArray(ev.ground);
+    L.uGroundI.value = env * K;
+  } else {
+    bu.uProg.value = age / ev.lead;
+    bu.uLeaderE.value = 0;
+    bu.uMainE.value = env * 0.8;
+    bu.uBranchE.value = env * 0.5;
+    L.uLa0.value.fromArray(ev.seg0[0]); L.uLb0.value.fromArray(ev.seg0[1]);
+    if (topSt) { L.uLa1.value.fromArray(topSt.a); L.uLb1.value.fromArray(topSt.b); }
+    L.uLi0.value = env * K * 0.45;
+    L.uLi1.value = top * K;
+    L.uGroundI.value = 0;
+  }
+  // beyond this distance the flash adds nothing visible to the clouds
+  const Imax = Math.max(L.uLi0.value, L.uLi1.value);
+  let R = 0;
+  while (R < 400 && Imax * Math.exp(-0.03 * R) / (1 + 0.06 * R * R) > 0.003) R += 2;
+  L.uLR2.value = R * R;
+  L.uFlash.value = Imax > 0.003 ? 1 : 0;
+  const cp = camU.uCamPos.value;
+  _fd.set(ev.centre[0] - cp.x, ev.centre[1] - cp.y, ev.centre[2] - cp.z);
+  const dist = _fd.length();
+  cu.uFlashDir.value.copy(_fd.normalize());
+  const sky = env * 0.03 * Math.exp(-dist * 0.012);
+  cu.uSkyFlash.value.set(0.80 * sky, 0.84 * sky, sky);
+  raysPass.u.uLumW.value = 0.5 * Math.max(0, 1 - env * 4);
+  const on = bu.uMainE.value + bu.uBranchE.value + bu.uLeaderE.value > 0.002;
+  cu.uBoltOn.value = on ? 1 : 0;
+  return on;
+}
+
 let simT = DBG && DBG.t !== undefined ? DBG.t : 30;
 let clock = 0, frame = 0, last = performance.now();
 let perfAcc = 0, perfN = 0, lastScaleChange = 0, lastDrop = -1e9;
@@ -1094,6 +1618,7 @@ function render(dt) {
   camU.uTime.value = clock;
   camU.uFrame.value = frame;
   updateCamera(simT, aspect);
+  const boltOn = updateLightning(dt);
 
   // moon position on screen for the light shafts
   const f = camU.uCamF.value, r = camU.uCamR.value, u = camU.uCamU.value;
@@ -1134,6 +1659,14 @@ function render(dt) {
   raysPass.u.tCloud.value = clouds.texture;
   renderer.setRenderTarget(raysRT);
   renderer.render(raysPass.scene, quadCam);
+  if (boltOn) {
+    if (!boltRT) sizeBoltRT();
+    renderer.setRenderTarget(boltRT);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear(true, false, false);
+    renderer.render(boltScene, quadCam);
+    compPass.u.tBolt.value = boltRT.texture;
+  }
   compPass.u.tCloud.value = clouds.texture;
   compPass.u.tRays.value = raysRT.texture;
   renderer.setRenderTarget(null);
@@ -1255,6 +1788,13 @@ function buildPanel() {
     html += '</div>';
   }
   html += '<div class="foot"><span id="g-name"></span><button type="button" id="g-reset">Reset</button></div>';
+  html += `<div class="sec">Weather</div>
+    <label class="check"><input type="checkbox" id="w-on"> Lightning in the storm clouds</label>
+    <div class="row"><label for="w-rate">Storm activity</label><output id="w-rate-v"></output>
+      <div class="ctl"><input type="range" id="w-rate" min="0.25" max="3" step="0.05"></div>
+      <div class="ends"><span>Rare</span><span>Frequent</span></div>
+    </div>
+    <div class="foot" style="margin-top:6px"><span>L sends a flash now</span><button type="button" id="w-now">Flash now</button></div>`;
   html += `<div class="sec">Performance</div>
     <div class="stats" aria-live="off">
       <span>Clouds</span><b id="q-cloud">–</b>
@@ -1283,6 +1823,7 @@ buildPanel(); syncPanel(); applyGrade();
 gradeBody.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
+  if (t.id === 'w-on' || t.id === 'w-rate') { onStormInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
@@ -1292,6 +1833,7 @@ gradeBody.addEventListener('input', e => {
 gradeBody.addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.id === 'w-now') { flashNow(); return; }
   const name = b.dataset.preset || (b.id === 'g-reset' ? (grade.preset in GRADE_PRESETS ? grade.preset : GRADE_DEFAULT) : null);
   if (!name) return;
   grade = Object.assign({ preset: name }, GRADE_PRESETS[name]);
@@ -1306,6 +1848,7 @@ window.addEventListener('keydown', e => {
   if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
   if (e.key === 'g' || e.key === 'G') setPanel(!gradeEl.classList.contains('open'));
   if (e.key === 'Escape') setPanel(false);
+  if (e.key === 'l' || e.key === 'L') flashNow();
 });
 // show the controls once the scene is up; hide cursor and closed button when idle
 let idleTimer = 0;
@@ -1369,6 +1912,32 @@ function perfTick(raw) {
 }
 
 /* ---------------------------------------------------------------------------
+   Weather: lightning on/off and how often it flashes, saved per viewer
+--------------------------------------------------------------------------- */
+const STORM_STORE = 'moonlit-cloud-sea:storm:v1';
+let storm = { on: true, rate: 1 };
+try { const w = JSON.parse(localStorage.getItem(STORM_STORE) || 'null'); if (w && typeof w.on === 'boolean' && w.rate > 0) storm = w; } catch (e) {}
+const wOn = document.getElementById('w-on'), wRate = document.getElementById('w-rate'), wRateV = document.getElementById('w-rate-v');
+function syncStorm() {
+  wOn.checked = storm.on;
+  wRate.value = storm.rate;
+  wRateV.textContent = storm.on ? '×' + (+storm.rate).toFixed(2) : 'off';
+}
+function onStormInput(t) {
+  if (t.id === 'w-on') storm.on = t.checked;
+  else storm.rate = parseFloat(t.value);
+  if (flash === null) nextFlash = Math.min(nextFlash, clock + 9 / storm.rate);
+  try { localStorage.setItem(STORM_STORE, JSON.stringify(storm)); } catch (e) {}
+  syncStorm();
+}
+function flashNow() {
+  if (flash || !baked) return;
+  const r = rnd();
+  startFlash(r < 0.5 ? 'cg' : 'ic');
+}
+syncStorm();
+
+/* ---------------------------------------------------------------------------
    Full screen
 --------------------------------------------------------------------------- */
 function toggleFullscreen() {
@@ -1382,7 +1951,19 @@ window.addEventListener('keydown', e => {
   if (e.key === 'f' || e.key === 'F') toggleFullscreen();
 });
 
-window.__cloudScene = { setTime: v => { simT = v; }, setClock: v => { clock = v; }, step: () => { frame++; render(0); renderer.getContext().finish(); } };
+window.__cloudScene = {
+  setTime: v => { simT = v; }, setClock: v => { clock = v; },
+  step: () => { frame++; render(0); renderer.getContext().finish(); },
+  // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
+  strike: (kind, hold) => { if (flash) endFlash(); return startFlash(kind || 'cg', { hold }); },
+  holdFlash: age => { if (flash) flash.hold = age; },
+  storms: () => CBS.map(c => ({ x: +c.cx.toFixed(1), z: +c.cz.toFixed(1), R0: +c.R0.toFixed(1), H: +c.H.toFixed(1),
+    sdMid: +sdAt(colAt(Object.assign({ x: c.cx, z: c.cz }, c), (LT.BASE + c.H) / 2)).toFixed(2) })),
+  peak: k => flash ? flash.strokes[Math.min(k || 0, flash.strokes.length - 1)].t + 0.004 : null,
+  lt: () => ({ boltOn: compPass.u.uBoltOn.value, mainE: boltMat.uniforms.uMainE.value, prog: boltMat.uniforms.uProg.value,
+    rt: boltRT && [boltRT.width, boltRT.height], li: [lightU.uLi0.value, lightU.uLi1.value], R: Math.sqrt(lightU.uLR2.value),
+    seg1: flash && flash.seg1, cam: camPos(), next: +(nextFlash - clock).toFixed(2), inRange: !!pickStorm(null) })
+};
 })();
 </script>
 </body>
