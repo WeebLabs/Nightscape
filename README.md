@@ -70,7 +70,7 @@ The bake runs in small chunks across several frames to avoid stalling the GPU. I
 
 At runtime the cloud shape is read from the bake and one octave of finer live billowing is added on top, instead of rebuilding the whole field per sample. In clear air a sample is a single texture read, and the baked distance also says how far a ray can safely skip. This made the cloud pass roughly 5× cheaper. The bake stores the true field: the above-the-deck shortcut used to speed up skipping is deliberately kept out of it, since baking that shortcut showed up as a phantom sheet of puffs.
 
-Each cloud sample also takes two crisp local samples toward the moon, so edges stay sharp, then reads the bake for everything beyond. Beyond about 70 units only the bake is used, with a smooth blend between 55 and 80 units. Shading combines Beer–Lambert transmittance, a dual-lobe Henyey–Greenstein phase function, a three-octave multiple-scattering approximation, a "powder" term, and height- and occlusion-weighted ambient light. Moonlight shifts from cool silver to warm toward the moon, and haze thins with altitude so distant giants stay visible.
+Each cloud sample also takes two crisp local samples toward the moon, so edges stay sharp, then reads the bake for everything beyond. Beyond about 70 units only the bake is used, with a smooth blend between 55 and 80 units. Shading combines Beer–Lambert transmittance, a dual-lobe Henyey–Greenstein phase function, a three-octave multiple-scattering approximation, a "powder" term, and height- and occlusion-weighted ambient light. Moonlight shifts from cool silver to warm toward the moon, and haze thins with altitude so distant giants stay visible. Close up the haze is a plain night blue; only cloud beyond about 100 units takes on the sky's colour in its direction (the warm horizon band, the moon's halo), so near clouds don't carry a stripe of horizon glow.
 
 ### Sampling built for stability
 
@@ -143,6 +143,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
     - stars cut off at the faces of their hash cells, now placed on the sky sphere and checked across neighbouring cells.
 
     Measured at 61% cloud resolution over 4 positions and 48 frames each, cloud jumps larger than 32 brightness levels fell from 327 to 4, and jumps larger than 64 levels from 112 to none. The frame costs about 15% more GPU time. Most of that is the march now sampling planes it used to skip by mistake. Sub-pixel jitter was also tried and made no visible difference, so it was left out.
+17. **Near-cloud fog.** Fog took its colour from the sky in each pixel's direction, so close clouds crossing the horizon on screen wore a band of horizon glow. Close-range fog is now a plain night blue that blends into the sky's colour between 100 and 250 units.
 
 ## Known limitations and ideas
 

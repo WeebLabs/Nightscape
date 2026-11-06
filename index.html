@@ -676,6 +676,7 @@ void main(){
   float ph2 = mix(hg(cosT, -0.05), hg(cosT, 0.20), 0.70);
   float backlit = smoothstep(0.35, 0.97, cosT);
   vec3 fogC = skyBase(rd, uMoonDir) * 0.94;
+  const vec3 AIR_C = vec3(0.0060, 0.0112, 0.0245) * 0.94;   // the sky's plain horizon blue
 
   float jit = ign(gl_FragCoord.xy + mod(uFrame, 64.0) * 5.588238);
   vec3 S = vec3(0.0);
@@ -753,7 +754,10 @@ void main(){
       vec3 L = lightCol * (MOON_I * e * pf) + amb;
       if (uFlash > 0.0) L += lightningAt(p);
       float fogA = 1.0 - exp(-t * 0.016 * mix(1.0, 0.3, smoothstep(4.0, 30.0, p.y)));
-      L = mix(L, fogC, fogA);
+      // Up close the air is a plain night blue. The sky's colour in this direction (its
+      // warm horizon band, the moon's halo) comes from a long path of air, so only
+      // distant cloud takes it on; otherwise near clouds wear a stripe of horizon glow.
+      L = mix(L, mix(AIR_C, fogC, smoothstep(100.0, 250.0, t)), fogA);
       float tr = exp(-d * SIG * dtW);
       S += T * L * (1.0 - tr);
       float w = T * (1.0 - tr); dSum += w * t; wSum += w;
