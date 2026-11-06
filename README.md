@@ -77,9 +77,12 @@ Each cloud sample also takes two crisp local samples toward the moon, so edges s
 Most of the development effort went into making the clouds hold still while the camera moves.
 
 - **World-anchored samples.** View rays sample the cloud on planes fixed in the world (constant z) rather than at distances from the camera, so flying forward never slides the sample slices through a cloud. Spacing starts at 0.06 units and doubles at 5, 10, 20, 40, 80 and 160 units out.
-- **Blended spacing changes.** Over the far half of each distance band, every other plane fades out and its neighbours take over its share, so the switch to coarser spacing is gradual.
+- **Blended spacing changes.** Over the far half of each distance band, every other plane fades out and its neighbours take over its share, so the switch to coarser spacing is gradual. This applies to the refined planes near surfaces too.
+- **Clean band hand-off.** The band edges move with the camera. When a ray's next sample falls past an edge, it is placed on the coarser band's grid. Otherwise a plane from the finer grid would carry the coarser band's weight and exist only until the edge moved past it, flicking a piece of cloud in and out.
 - **Surface refinement.** Near a cloud surface, rays drop to a twice-as-fine set of world-anchored planes, so small puffs and wisps can't slip between samples and pop in and out.
-- **Conservative empty-space skipping.** Rays skip quickly through clear air but cautiously enough not to leap over thin cloud edges.
+- **Softer distant edges.** Far out, one sample stands for a thick slab, so a sharp density edge turns a tiny shift of a thin wisp into a big jump in opacity. The density ramp at cloud edges widens with distance (`RAMP_K`, at half strength) to keep those changes gradual.
+- **Conservative empty-space skipping.** Rays skip through clear air by only a fifth of the baked distance to the nearest cloud. The baked field is not a true distance: near anvils and turrets it changes up to about 6.7× faster than distance, so longer skips could jump straight over a piece of tower.
+- **Soft far limit.** Rays march up to 200 units, rising to 320 for rays climbing above the horizon, with the limit blended by ray height. Cloud fades out over the last 45 units before the limit, so planes crossing it as the camera moves don't add or drop whole slabs of distant cloud.
 - **No per-frame randomness in the clouds.** With the camera still, consecutive frames are identical.
 
 ### Temporal accumulation
@@ -132,6 +135,14 @@ The scene was built iteratively from a brief and four reference photos of moonli
 13. **Performance readout.** The panel shows the live resolution and frame rate and can pin the cloud resolution.
 14. **Baked cloud shape.** Rendering reads a baked copy of the cloud field plus live fine detail, about 5.5× faster per frame in testing, with matching appearance.
 15. **Lightning.** Ground strikes and in-cloud flashes from the cumulonimbus, with matching cloud, sea and sky lighting. A held flash adds well under a millisecond per frame in testing.
+16. **Edge popping.** Small pieces at the sides and tops of clouds, especially the cumulonimbus, blinked in and out as the camera moved. Five sources were traced to individual pixels:
+    - the hard end of the march, now a soft far limit;
+    - skips that leapt over cloud because the baked field understates distance near steep shapes, now shorter;
+    - samples that flicked in and out where the distance bands change spacing, now a clean hand-off;
+    - thin distant wisps with edges sharper than the sample spacing, now softened with distance;
+    - stars cut off at the faces of their hash cells, now placed on the sky sphere and checked across neighbouring cells.
+
+    Measured at 61% cloud resolution over 4 positions and 48 frames each, cloud jumps larger than 32 brightness levels fell from 327 to 4, and jumps larger than 64 levels from 112 to none. The frame costs about 15% more GPU time. Most of that is the march now sampling planes it used to skip by mistake. Sub-pixel jitter was also tried and made no visible difference, so it was left out.
 
 ## Known limitations and ideas
 
