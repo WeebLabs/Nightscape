@@ -28,10 +28,12 @@ The cursor and the closed panel button fade out after a couple of seconds withou
 
 **Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map (public domain), embedded in the page. You see the real near side, north up, with the maria and Tycho in their correct places. A layered halo surrounds it. The sky is a deep gradient with a warm glow along the horizon under the moon, and procedural twinkling stars that fade near the moon's glare and the horizon.
 
-**Lightning.** Every several seconds one of the cumulonimbus near the camera flashes. About a third of the flashes are ground strikes and the rest stay in the cloud.
+**Lightning.** Every several seconds one of the cumulonimbus near the camera flashes. About two in three flashes are buried deep in the cloud, one in five is a ground strike, and the rest are in-cloud flashes near the surface.
+
+- **Deep flashes** fire in the core of the tower, well inside the cloud. Their light is scattered through so much cloud that the tower only glows softly from within. They are set to 70% of a ground strike's strength, with slower, gentler pulses and no visible channel.
 
 - **Ground strikes** have a faint stepped leader that works its way down, then one to four return strokes tens of milliseconds apart. Some strokes carry a flickering continuing current. Some strikes leave the cloud base and show only through breaks in the deck. Others leave the side of the tower and arc through clear air before dropping to the sea, which is known as a "bolt from the blue". Before a strike is chosen, ten candidate channels are tested against the baked cloud field, and the one the camera sees best wins.
-- **In-cloud flashes** fire between charge regions inside the tower as a train of pulses that wander along the channel. On the tall towers with an anvil, some run as "crawlers" just under the anvil base.
+- **Near-surface in-cloud flashes** fire between charge regions inside the tower as a train of pulses that wander along the channel. On the tall towers with an anvil, some run as "crawlers" just under the anvil base.
 - **Cloud lighting.** Each flash also acts as two line lights along its channel inside the cloud ray march. Light from a channel buried in cloud is scattered many times before it escapes, so it fades far more gently than direct moonlight. Three reads of the bake estimate how much cloud lies in between. The result is a hot spot near the channel that spreads through the whole tower. A ground strike also lights the sea around its strike point and the rainy air under the deck.
 - **The bolt** is drawn at full resolution as a jagged, branching channel made by midpoint displacement. Each point of the channel marches the baked cloud field back to the camera, so cloud in front hides it and thin cloud only veils it.
 - Storms often flash in quick bursts, so there's a 30% chance that the next flash follows within two seconds, usually from the same tower.
