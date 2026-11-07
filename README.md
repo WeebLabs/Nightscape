@@ -113,7 +113,7 @@ The grade is applied after ACES tone mapping and is driven entirely from the pan
 
 - **Light:** exposure, white balance (temperature and tint), light-shaft strength
 - **Colour:** saturation, contrast, split toning (shadow and highlight tint colours with strengths), and "night glow" (shadow colour lifted into the blacks)
-- **Lens:** vignette, film grain
+- **Lens:** vignette, film grain. The grain behaves like film: soft clumps about 1.5 pixels across (scaled with the screen) plus a finer sparkle, mostly neutral with a hint of colour, strongest in the shadows and midtones, and refreshed 24 times a second. A faint separate dither prevents banding even with grain at 0.
 
 **Presets:**
 
@@ -162,6 +162,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 19. **Stars near the horizon.** The star field had faded out well above the horizon and pulsed too slowly to read as twinkling. Stars now reach almost to the horizon, a few bright hero stars and a Mars-like planet sit low ahead, and every star flickers a few times a second. The panel has Twinkle and Stars reach down to controls.
 20. **Town lights.** Warm street lights in small towns, lamp-lit roads between them and scattered farmhouse lights, all baked into a fifth terrain texture that also holds the light they cast on the ground. The panel's Ground section sets their brightness at no cost.
 21. **Radio masts.** Thin masts on a few summits with flashing red aircraft warning lights, drawn live in the ground pass.
+22. **Film grain.** The grain slider barely did anything: it was single-pixel noise of at most ±1.5%. It is now film-style grain, about six times stronger at the same setting.
 
 ## Known limitations and ideas
 
