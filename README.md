@@ -53,7 +53,7 @@ Each frame then only finds where a ray meets the ground (a height-field march th
 - **Cloud lighting.** Each flash also acts as two line lights along its channel inside the cloud ray march. Light from a channel buried in cloud is scattered many times before it escapes, so it fades far more gently than direct moonlight. Three reads of the bake estimate how much cloud lies in between. The result is a hot spot near the channel that spreads through the whole tower. A ground strike also lights the land and water around its strike point and the rainy air under the deck.
 - **The bolt** is drawn at full resolution as a jagged, branching channel made by midpoint displacement. Each point of the channel marches the baked cloud field back to the camera, so cloud in front hides it and thin cloud only veils it.
 - Storms often flash in quick bursts, so there's a 30% chance that the next flash follows within two seconds, usually from the same tower.
-- The panel's Weather section turns lightning off or makes it rarer or more frequent. These settings are saved in the browser. With "reduce motion" set in the operating system, flashes are softer and single, with no rapid flicker.
+- The panel's Weather section turns lightning off or makes it rarer or more frequent. Its Minimum gap slider (2.5 s to 3 minutes, logarithmic) sets the shortest quiet spell before lightning can flash again, the first flash included; any setting above the far left also turns off the quick bursts, so the gap holds between any two flashes. The `L` key and Flash now button ignore it. These settings are saved in the browser. With "reduce motion" set in the operating system, flashes are softer and single, with no rapid flicker.
 
 **Light shafts.** A screen-space radial pass streaks moonlight past whatever is occluding the moon, so beams fan out when a tower crosses it. It also picks up the brightest silver linings.
 
@@ -167,6 +167,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 21. **Radio masts.** Thin masts on a few summits with flashing red aircraft warning lights, drawn live in the ground pass.
 22. **Film grain.** The grain slider barely did anything: it was single-pixel noise of at most ±1.5%. It is now film-style grain, about six times stronger at the same setting.
 23. **Shooting stars.** Occasional meteors across the part of the sky in view, with a rate slider and an `M` key to send one.
+24. **Lightning minimum gap.** A Weather slider for the shortest time between flashes, which also turns off quick bursts when set above its default.
 
 ## Known limitations and ideas
 

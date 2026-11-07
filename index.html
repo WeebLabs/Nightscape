@@ -2197,7 +2197,7 @@ function setBoltMesh(lines) {
   boltScene.add(boltMesh);
 }
 
-let flash = null, nextFlash = 6 + rnd() * 6, lastStorm = null, burst = false;
+let flash = null, nextFlash = 6 + rnd() * 6, lastStorm = null, burst = false, lastEnd = 0;
 function startFlash(kind, opts) {
   opts = opts || {};
   const cb = pickStorm(burst ? lastStorm : null);
@@ -2214,9 +2214,17 @@ function pickKind() { const r = rnd(); return r < 0.65 ? 'deep' : r < 0.85 ? 'cg
 function endFlash() {
   flash = null;
   setBoltMesh(null);
-  burst = rnd() < 0.3;                                  // storms often flash in quick bursts
+  // storms often flash in quick bursts, unless the panel asks for a longer minimum gap
+  burst = storm.minGap <= 2.5 && rnd() < 0.3;
+  if (burst) { nextFlash = clock + 0.5 + rnd() * 1.8; return; }
+  lastEnd = clock;
+  nextFlash = clock + flashGap();
+}
+// the quiet time after a flash (or a burst of them): random at the panel's activity
+// rate, but never shorter than the panel's minimum gap
+function flashGap() {
   const mean = 9 / Math.max(storm.rate, 0.05);
-  nextFlash = clock + (burst ? 0.5 + rnd() * 1.8 : Math.max(2.5, -Math.log(1 - rnd()) * mean));
+  return Math.max(2.5, -Math.log(1 - rnd()) * mean) + Math.max(storm.minGap - 2.5, 0);
 }
 const _fd = new THREE.Vector3();
 function updateLightning(dt) {
@@ -2478,6 +2486,10 @@ function buildPanel() {
       <div class="ctl"><input type="range" id="w-rate" min="0.25" max="3" step="0.05"></div>
       <div class="ends"><span>Rare</span><span>Frequent</span></div>
     </div>
+    <div class="row"><label for="w-gap">Minimum gap</label><output id="w-gap-v"></output>
+      <div class="ctl"><input type="range" id="w-gap" min="0" max="1" step="0.01"></div>
+      <div class="ends"><span>Bursts</span><span>3 min</span></div>
+    </div>
     <div class="foot" style="margin-top:6px"><span>L sends a flash now</span><button type="button" id="w-now">Flash now</button></div>`;
   html += `<div class="sec">Sky</div>
     <div class="row"><label for="s-twinkle">Twinkle</label><output id="s-twinkle-v"></output>
@@ -2526,7 +2538,7 @@ buildPanel(); syncPanel(); applyGrade();
 gradeBody.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
-  if (t.id === 'w-on' || t.id === 'w-rate') { onStormInput(t); return; }
+  if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors') { onSkyInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
@@ -2618,21 +2630,33 @@ function perfTick(raw) {
 }
 
 /* ---------------------------------------------------------------------------
-   Weather: lightning on/off and how often it flashes, saved per viewer
+   Weather: lightning on/off, how often it flashes and the shortest quiet spell
+   between flashes, saved per viewer
 --------------------------------------------------------------------------- */
 const STORM_STORE = 'moonlit-cloud-sea:storm:v1';
-let storm = { on: true, rate: 1 };
-try { const w = JSON.parse(localStorage.getItem(STORM_STORE) || 'null'); if (w && typeof w.on === 'boolean' && w.rate > 0) storm = w; } catch (e) {}
+let storm = { on: true, rate: 1, minGap: 2.5 };
+try { const w = JSON.parse(localStorage.getItem(STORM_STORE) || 'null'); if (w && typeof w.on === 'boolean' && w.rate > 0) storm = Object.assign(storm, w); } catch (e) {}
+if (!(storm.minGap >= 2.5)) storm.minGap = 2.5;
 const wOn = document.getElementById('w-on'), wRate = document.getElementById('w-rate'), wRateV = document.getElementById('w-rate-v');
+const wGap = document.getElementById('w-gap'), wGapV = document.getElementById('w-gap-v');
+// the minimum-gap slider is logarithmic: 2.5 s at the left end, 3 minutes at the right.
+// At the left end (the default) quick bursts of follow-up flashes are allowed; anything
+// longer is a true minimum between any two flashes.
+const GAP_MIN = 2.5, GAP_SPAN = 72;
 function syncStorm() {
   wOn.checked = storm.on;
   wRate.value = storm.rate;
   wRateV.textContent = storm.on ? '×' + (+storm.rate).toFixed(2) : 'off';
+  const g = storm.minGap;
+  wGap.value = Math.log(g / GAP_MIN) / Math.log(GAP_SPAN);
+  wGapV.textContent = g <= 2.5 ? 'bursts allowed' : g < 10 ? g.toFixed(1) + ' s' : g < 60 ? Math.round(g) + ' s' : +(g / 60).toFixed(1) + ' min';
 }
 function onStormInput(t) {
   if (t.id === 'w-on') storm.on = t.checked;
+  else if (t.id === 'w-gap') storm.minGap = +(GAP_MIN * Math.pow(GAP_SPAN, parseFloat(t.value))).toFixed(1);
   else storm.rate = parseFloat(t.value);
-  if (flash === null) nextFlash = Math.min(nextFlash, clock + 9 / storm.rate);
+  // between flashes, draw the next one afresh from the end of the last
+  if (flash === null && !burst) nextFlash = Math.max(lastEnd + flashGap(), clock + 0.5);
   try { localStorage.setItem(STORM_STORE, JSON.stringify(storm)); } catch (e) {}
   syncStorm();
 }
@@ -2641,6 +2665,7 @@ function flashNow() {
   startFlash(pickKind());
 }
 syncStorm();
+if (storm.minGap > 2.5) nextFlash = Math.max(nextFlash, flashGap());   // the first flash waits too
 
 /* ---------------------------------------------------------------------------
    Sky and ground: how much the stars twinkle, how close to the horizon they reach,
