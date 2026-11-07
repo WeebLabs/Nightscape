@@ -135,24 +135,24 @@ Changing any control switches the panel's label to "Custom grade". **Reset** ret
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Lightning in the storm clouds | On or off | On | Turns automatic lightning on or off |
-| Storm activity | ×0.25 to ×3 | ×1 | How often lightning flashes. The average wait between flashes is 9 seconds divided by this value, and never less than 2.5 seconds |
-| Minimum gap | 2.5 s to 3 min, logarithmic | 2.5 s ("bursts allowed") | The shortest quiet spell before lightning can flash again, the first flash after loading included. At the far left, storms may flash in quick bursts, with a 30% chance of a follow-up flash within about two seconds. Any higher setting turns bursts off, so the gap holds between every pair of flashes |
+| Storm activity | ×0.25 to ×3 | ×0.25 | How often lightning flashes. The average wait between flashes is 9 seconds divided by this value, and never less than 2.5 seconds |
+| Minimum gap | 2.5 s to 3 min, logarithmic | 40 s | The shortest quiet spell before lightning can flash again, the first flash after loading included. At the far left, storms may flash in quick bursts, with a 30% chance of a follow-up flash within about two seconds. Any higher setting turns bursts off, so the gap holds between every pair of flashes |
 | Flash now | Button | | Sends a flash immediately, like `L`. It ignores the minimum gap |
 
 ### Sky
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
-| Twinkle | Steady 0 to Strong ×2 | ×1 | How much the stars flicker. Twinkling is always deeper near the horizon, where starlight passes through more air |
+| Twinkle | Steady 0 to Strong ×2 | ×1.40 | How much the stars flicker. Twinkling is always deeper near the horizon, where starlight passes through more air |
 | Stars reach down to | 0° to about 20° above the horizon | 2.0° | The lowest elevation at which stars appear (stored as the sine of the angle, 0 to 0.35) |
-| Shooting stars | Off to 6 per minute | 0.5 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely |
+| Shooting stars | Off to 6 per minute | 2 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely |
 | Shooting star | Button | | Sends a shooting star immediately, like `M` |
 
 ### Ground
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
-| Town lights | Off to ×3 | ×1 | Brightness of the town, road and farmhouse lights and the glow they cast on the ground and lakes. It is a single multiplication at render time and needs no rebake. It does not affect the red mast lights |
+| Town lights | Off to ×3 | ×1.95 | Brightness of the town, road and farmhouse lights and the glow they cast on the ground and lakes. It is a single multiplication at render time and needs no rebake. It does not affect the red mast lights |
 
 ### Performance
 
@@ -199,7 +199,7 @@ To return everything to the defaults, clear the site's storage in the browser, o
 
 **Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map, embedded in the page. It shows the real near side, north up, with the maria and Tycho in their correct places, inside a layered halo. The sky is a deep gradient with a warm glow along the horizon under the moon. Procedural stars fade near the moon's glare, twinkle irregularly a few times a second, and reach to within about 2° of the horizon. A few bright stars sit low ahead, dimmed and reddened by the thick air, and the lowest is a steady reddish planet.
 
-**Shooting stars.** By default a meteor crosses the sky about once every two minutes, at random. Both ends of its path are picked on screen, so the whole streak is visible. It stays at least 6° up, clear of the moon, heading generally downward and burning out above the horizon. Each one is a pixel-thin line with a hot blue-white head and a warmer fading trail, and it lasts 0.3 to 2 seconds. About one in twelve is a brighter, longer fireball. Clouds hide shooting stars just as they hide the stars.
+**Shooting stars.** By default a meteor crosses the sky about twice a minute, at random. Both ends of its path are picked on screen, so the whole streak is visible. It stays at least 6° up, clear of the moon, heading generally downward and burning out above the horizon. Each one is a pixel-thin line with a hot blue-white head and a warmer fading trail, and it lasts 0.3 to 2 seconds. About one in twelve is a brighter, longer fireball. Clouds hide shooting stars just as they hide the stars.
 
 **Lightning.** Every so often one of the storm towers near the camera flashes. There are three kinds of flash:
 

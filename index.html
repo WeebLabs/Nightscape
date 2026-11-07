@@ -2634,13 +2634,13 @@ function perfTick(raw) {
    between flashes, saved per viewer
 --------------------------------------------------------------------------- */
 const STORM_STORE = 'moonlit-cloud-sea:storm:v1';
-let storm = { on: true, rate: 1, minGap: 2.5 };
+let storm = { on: true, rate: 0.25, minGap: 40.3 };
 try { const w = JSON.parse(localStorage.getItem(STORM_STORE) || 'null'); if (w && typeof w.on === 'boolean' && w.rate > 0) storm = Object.assign(storm, w); } catch (e) {}
 if (!(storm.minGap >= 2.5)) storm.minGap = 2.5;
 const wOn = document.getElementById('w-on'), wRate = document.getElementById('w-rate'), wRateV = document.getElementById('w-rate-v');
 const wGap = document.getElementById('w-gap'), wGapV = document.getElementById('w-gap-v');
 // the minimum-gap slider is logarithmic: 2.5 s at the left end, 3 minutes at the right.
-// At the left end (the default) quick bursts of follow-up flashes are allowed; anything
+// At the left end quick bursts of follow-up flashes are allowed; anything
 // longer is a true minimum between any two flashes.
 const GAP_MIN = 2.5, GAP_SPAN = 72;
 function syncStorm() {
@@ -2672,7 +2672,7 @@ if (storm.minGap > 2.5) nextFlash = Math.max(nextFlash, flashGap());   // the fi
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1, low: 0.035, lamps: 1, meteors: 0.5 };
+let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
