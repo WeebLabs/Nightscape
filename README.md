@@ -12,6 +12,7 @@ Everything is in a single self-contained file, `index.html`. Open it in a curren
 | Double-click / `F` | Toggle full screen |
 | `G` or the corner button | Open the colour-grade panel |
 | `L` | Send a lightning flash now |
+| `M` | Send a shooting star now |
 | `Esc` | Close the panel |
 
 The cursor and the closed panel button fade out after a couple of seconds without mouse movement.
@@ -40,6 +41,8 @@ Each frame then only finds where a ray meets the ground (a height-field march th
 **Radio masts.** The two highest summits in each world tile carry a thin lattice mast about 1.8 units (roughly 70 m) tall. Each has a red aircraft warning light on top that flashes every two seconds, out of step with the others, and a steady dimmer red light halfway up. A flash faintly reddens the summit around the mast's foot. The summits are picked on the CPU from the read-back heights once the terrain bake finishes. The masts and lights are drawn live in the ground pass with a few simple tests per pixel, so the lights can blink and sit at the real top of the mast. The Town lights slider doesn't affect them.
 
 **Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map (public domain), embedded in the page. You see the real near side, north up, with the maria and Tycho in their correct places. A layered halo surrounds it. The sky is a deep gradient with a warm glow along the horizon under the moon, and procedural stars that fade near the moon's glare. The stars twinkle irregularly a few times a second, more deeply near the horizon, and reach to within about 2° of it, twice as dense in the lowest part of the sky. A few bright "hero" stars sit low over the horizon ahead, dimmed and reddened by the thick air there. The lowest, nearest the middle, is a steady reddish planet like Mars. The panel's Sky section sets how much the stars twinkle and how close to the horizon they reach; both are saved in the browser.
+
+**Shooting stars.** Now and then, at random (about once every two minutes by default), a meteor streaks across the sky in view. Both ends of its path are picked on screen, so the whole streak is visible, at least 6° up, clear of the moon, heading generally downward and burning out above the horizon. It is a pixel-thin line with a hot blue-green-white head and a warmer trail that fades behind it; it flares up and dies away over 0.3–2 seconds, and about one in twelve is a brighter, longer fireball. Clouds hide it like the stars. The Sky section's Shooting stars slider sets how often they come (off to about every 10 seconds, saved in the browser), and `M` or the panel's button sends one now. With none in the sky they cost nothing.
 
 **Lightning.** Every several seconds one of the cumulonimbus near the camera flashes. About two in three flashes are buried deep in the cloud, one in five is a ground strike, and the rest are in-cloud flashes near the surface.
 
@@ -163,6 +166,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
 20. **Town lights.** Warm street lights in small towns, lamp-lit roads between them and scattered farmhouse lights, all baked into a fifth terrain texture that also holds the light they cast on the ground. The panel's Ground section sets their brightness at no cost.
 21. **Radio masts.** Thin masts on a few summits with flashing red aircraft warning lights, drawn live in the ground pass.
 22. **Film grain.** The grain slider barely did anything: it was single-pixel noise of at most ±1.5%. It is now film-style grain, about six times stronger at the same setting.
+23. **Shooting stars.** Occasional meteors across the part of the sky in view, with a rate slider and an `M` key to send one.
 
 ## Known limitations and ideas
 

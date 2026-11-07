@@ -1302,6 +1302,8 @@ uniform vec2 uCloudTexel, uRes;
 uniform vec3 uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime, uFrame, uPixAng, uMoonR, uExposure, uMoonReady;
 uniform float uTwinkle, uStarLow;   // Sky panel: how much stars twinkle, how low they reach
+uniform vec3 uMetA, uMetB;   // a shooting star: where it starts and where it would end on the sky
+uniform vec4 uMet;           // progress 0..1, brightness, trail length (fraction of the path), 1 while one is up
 uniform sampler2D uMoonMap;
 uniform vec3 uBalance, uShadowTint, uHighTint;
 uniform float uShadowAmt, uHighAmt, uLift, uSat, uContrast, uVignette, uGrain, uRays;
@@ -1382,6 +1384,29 @@ ${HERO_GLSL}
   return col;
 }
 
+// A shooting star: a streak along a great circle whose bright head runs from A toward B,
+// leaving a trail that fades behind it. It flares up, then burns out before reaching B.
+// The head is a hot blue-green white, the trail cooler and warmer.
+vec3 meteor(vec3 rd){
+  vec3 n = normalize(cross(uMetA, uMetB));
+  float dn = dot(rd, n);
+  float w = max(uPixAng * 0.7, 2.0e-4);
+  if (abs(dn) > 6.0 * w) return vec3(0.0);
+  float ang = acos(clamp(dot(uMetA, uMetB), -1.0, 1.0));
+  vec3 q = rd - n * dn;
+  float s = atan(dot(cross(uMetA, q), n), dot(uMetA, q)) / ang;   // 0 at A, 1 at B
+  float p = uMet.x, tl = max(uMet.z, 1e-3);
+  float k = (s - (p - tl)) / tl;                                   // 0 at the trail's end, 1 at the head
+  if (s < 0.0 || k < 0.0 || s > p + 6.0 * w / ang) return vec3(0.0);
+  float across = exp(-dn * dn / (w * w));
+  float trail = k < 1.0 ? k * k : 0.0;
+  float ds = (s - p) * ang;
+  float head = 2.2 * exp(-(ds * ds + dn * dn) / (w * w * 2.0));
+  float env = smoothstep(0.0, 0.12, p) * smoothstep(1.0, 0.72, p) * (0.6 + 0.6 * p);
+  vec3 c = mix(vec3(1.00, 0.80, 0.55), vec3(0.85, 1.00, 0.92), k) * trail * across + vec3(0.88, 1.00, 0.95) * head;
+  return c * env * uMet.y;
+}
+
 vec3 moonDisk(vec3 rd, vec3 m){
   float c = dot(rd, m);
   if (c < 0.9) return vec3(0.0);
@@ -1425,6 +1450,7 @@ void main(){
   vec3 st = starVis * c.a > 0.0 ? stars(rd) * starVis : vec3(0.0);
   // the hero stars low over the horizon (the regular field has faded out there)
   if (rd.y > 0.0 && rd.y < 0.3 && c.a > 0.0) st += heroStars(rd) * smoothstep(0.0, 0.015, rd.y) * smoothstep(0.03, 0.2, am);
+  if (uMet.w > 0.0 && rd.y > 0.0 && c.a > 0.0) st += meteor(rd) * smoothstep(0.0, 0.03, rd.y);
   vec3 sky = skyBase(rd, m) * (1.0 - 0.82 * diskMask) + st + moonDisk(rd, m);
 
   vec3 col = c.rgb + sky * c.a;
@@ -1637,6 +1663,7 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   uCloudTexel: { value: new THREE.Vector2() }, uRes: { value: new THREE.Vector2() },
   uPixAng: { value: 0.001 }, uMoonR: { value: MOON_R }, uExposure: { value: 1.12 },
   uTwinkle: { value: 1 }, uStarLow: { value: 0.035 },
+  uMetA: { value: new THREE.Vector3(0, 0, 1) }, uMetB: { value: new THREE.Vector3(0, 0.1, 1) }, uMet: { value: new THREE.Vector4(0, 0, 0, 0) },
   uMoonMap: { value: null }, uMoonReady: { value: 0 },
   uBalance: { value: new THREE.Vector3(1, 1, 1) }, uShadowTint: { value: new THREE.Vector3(1, 1, 1) },
   uHighTint: { value: new THREE.Vector3(1, 1, 1) }, uShadowAmt: { value: 0 }, uHighAmt: { value: 0 },
@@ -2267,6 +2294,7 @@ function render(dt) {
   camU.uFrame.value = frame;
   updateCamera(simT, aspect);
   const boltOn = updateLightning(dt);
+  updateMeteor(dt);
 
   // moon position on screen for the light shafts
   const f = camU.uCamF.value, r = camU.uCamR.value, u = camU.uCamU.value;
@@ -2459,7 +2487,12 @@ function buildPanel() {
     <div class="row"><label for="s-low">Stars reach down to</label><output id="s-low-v"></output>
       <div class="ctl"><input type="range" id="s-low" min="0" max="0.35" step="0.005"></div>
       <div class="ends"><span>Horizon</span><span>Higher</span></div>
-    </div>`;
+    </div>
+    <div class="row"><label for="s-meteors">Shooting stars</label><output id="s-meteors-v"></output>
+      <div class="ctl"><input type="range" id="s-meteors" min="0" max="6" step="0.1"></div>
+      <div class="ends"><span>Off</span><span>Often</span></div>
+    </div>
+    <div class="foot" style="margin-top:6px"><span>M sends one now</span><button type="button" id="s-met-now">Shooting star</button></div>`;
   html += `<div class="sec">Ground</div>
     <div class="row"><label for="s-lamps">Town lights</label><output id="s-lamps-v"></output>
       <div class="ctl"><input type="range" id="s-lamps" min="0" max="3" step="0.05"></div>
@@ -2494,7 +2527,7 @@ gradeBody.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.id === 'w-on' || t.id === 'w-rate') { onStormInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors') { onSkyInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
@@ -2505,6 +2538,7 @@ gradeBody.addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
   if (b.id === 'w-now') { flashNow(); return; }
+  if (b.id === 's-met-now') { launchMeteor(); return; }
   const name = b.dataset.preset || (b.id === 'g-reset' ? (grade.preset in GRADE_PRESETS ? grade.preset : GRADE_DEFAULT) : null);
   if (!name) return;
   grade = Object.assign({ preset: name }, GRADE_PRESETS[name]);
@@ -2520,6 +2554,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'g' || e.key === 'G') setPanel(!gradeEl.classList.contains('open'));
   if (e.key === 'Escape') setPanel(false);
   if (e.key === 'l' || e.key === 'L') flashNow();
+  if (e.key === 'm' || e.key === 'M') launchMeteor();
 });
 // show the controls once the scene is up; hide cursor and closed button when idle
 let idleTimer = 0;
@@ -2612,11 +2647,12 @@ syncStorm();
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1, low: 0.035, lamps: 1 };
+let sky = { twinkle: 1, low: 0.035, lamps: 1, meteors: 0.5 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
 const sLamps = document.getElementById('s-lamps'), sLampsV = document.getElementById('s-lamps-v');
+const sMet = document.getElementById('s-meteors'), sMetV = document.getElementById('s-meteors-v');
 function syncSky() {
   sTw.value = sky.twinkle; sLow.value = sky.low;
   sTwV.textContent = sky.twinkle === 0 ? 'off' : '×' + (+sky.twinkle).toFixed(2);
@@ -2626,15 +2662,62 @@ function syncSky() {
   sLamps.value = sky.lamps;
   sLampsV.textContent = sky.lamps === 0 ? 'off' : '×' + (+sky.lamps).toFixed(2);
   groundPass.u.uLamps.value = sky.lamps;
+  sMet.value = sky.meteors;
+  const gap = 60 / sky.meteors;
+  sMetV.textContent = sky.meteors === 0 ? 'off' : gap >= 90 ? 'every ~' + +(gap / 60).toFixed(1) + ' min' : 'every ~' + Math.round(gap) + ' s';
 }
 function onSkyInput(t) {
   if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value);
   else if (t.id === 's-lamps') sky.lamps = parseFloat(t.value);
+  else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
   syncSky();
 }
+
+/* ---------------------------------------------------------------------------
+   Shooting stars: at random (a Poisson process at the panel's rate), a meteor streaks
+   across the part of the sky in view, clear of the moon, heading generally downward.
+--------------------------------------------------------------------------- */
+const met = { on: false, t: 0, dur: 1, next: Infinity };
+function meteorGap() { return sky.meteors > 0 ? -Math.log(1 - Math.random()) * 60 / sky.meteors : Infinity; }
+function launchMeteor() {
+  // Both ends on screen (the view is a convex cone, so the whole path between them is
+  // too), clear of the moon and above the horizon. If the view shows too little sky,
+  // skip this one.
+  const F = camU.uCamF.value, R = camU.uCamR.value, U = camU.uCamU.value;
+  const tx = camU.uTanHalf.value * camU.uAspect.value, ty = camU.uTanHalf.value;
+  const onScreen = v => { const z = v.dot(F); return z > 0 && Math.abs(v.dot(R) / z / tx) < 0.92 && Math.abs(v.dot(U) / z / ty) < 0.92; };
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), tdir = new THREE.Vector3();
+  let L = 0, fire = false, ok = false;
+  for (let i = 0; i < 40 && !ok; i++) {
+    A.copy(F).addScaledVector(R, (Math.random() * 1.7 - 0.85) * tx).addScaledVector(U, (Math.random() * 1.7 - 0.85) * ty).normalize();
+    if (A.y < 0.1 || A.dot(MOON_DIR) > Math.cos(0.25)) continue;
+    const e = new THREE.Vector3(A.z, 0, -A.x).normalize(), u = new THREE.Vector3().crossVectors(A, e);
+    const th = -Math.PI * (0.12 + Math.random() * 0.76);           // heading: always somewhat downward
+    tdir.copy(e).multiplyScalar(Math.cos(th)).addScaledVector(u, Math.sin(th));
+    fire = Math.random() < 0.08;                                    // now and then a bright fireball
+    L = (fire ? 0.25 : 0.12) + Math.random() * 0.25;                // path length, radians
+    B.copy(A).multiplyScalar(Math.cos(L)).addScaledVector(tdir, Math.sin(L));
+    ok = B.y > 0.04 && B.dot(MOON_DIR) < Math.cos(0.15) && onScreen(B);
+  }
+  if (!ok) return;
+  compPass.u.uMetA.value.copy(A); compPass.u.uMetB.value.copy(B);
+  met.dur = L * (2.5 + Math.random() * 3) * (fire ? 1.5 : 1);
+  compPass.u.uMet.value.set(0, fire ? 0.6 : 0.08 + Math.random() * Math.random() * 0.17, 0.25 + Math.random() * 0.3, 1);
+  met.on = true; met.t = 0;
+}
+function updateMeteor(dt) {
+  if (met.on) {
+    met.t += dt;
+    const p = met.t / met.dur;
+    if (p < 1) { compPass.u.uMet.value.x = p; return; }
+    met.on = false; compPass.u.uMet.value.w = 0;
+    met.next = clock + meteorGap();
+  } else if (clock >= met.next) { launchMeteor(); if (!met.on) met.next = clock + meteorGap(); }
+}
 syncSky();
+met.next = clock + meteorGap();
 
 /* ---------------------------------------------------------------------------
    Full screen
