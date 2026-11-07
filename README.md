@@ -18,12 +18,11 @@ A live, endless flight just above a moonlit sea of clouds, rendered in real time
   - [Using it as a wallpaper](#using-it-as-a-wallpaper)
 - [Controls](#controls)
 - [Settings](#settings)
-  - [Colour grade](#colour-grade)
+  - [Colour](#colour)
   - [Weather](#weather)
   - [Sky](#sky)
-  - [Ground](#ground)
   - [Sound](#sound)
-  - [Performance](#performance)
+  - [Display](#display)
   - [Saved settings](#saved-settings)
   - [Page options](#page-options)
 - [What is in the scene](#what-is-in-the-scene)
@@ -93,18 +92,19 @@ Settings you choose in the panel are saved in that browser's local storage. A wa
 | `G`, or the button in the corner | Opens or closes the settings panel |
 | `Esc` | Closes the settings panel |
 | `L` | Sends a lightning flash now |
+| `Shift`+`L` | Sends a distant storm flash now, each time from a new position |
 | `M` | Sends a shooting star now |
 | `S` | Turns sound on or off. If sound is on but has not started yet, it starts it |
 
-The keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
+In the settings panel, the left and right arrow keys move between tabs when a tab has keyboard focus, and `Home` and `End` jump to the first and last tab. The other keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
 
 If your operating system is set to reduce motion, the flight runs at 35% of its normal speed and lightning flashes are softer, slower and single, with no rapid flicker.
 
 ## Settings
 
-Press `G` or click the corner button to open the panel. It has a section for each group of settings below, and every change takes effect immediately.
+Press `G` or click the corner button to open the panel. Its settings are organised into five tabs, Colour, Weather, Sky, Sound and Display, which match the sections below. The tab bar stays in view while a long tab scrolls, and the panel reopens on the tab you used last. Every change takes effect immediately.
 
-### Colour grade
+### Colour
 
 The grade is applied in the final pass, after ACES tone mapping, so it costs nothing measurable per frame. Five presets set every control at once:
 
@@ -134,6 +134,8 @@ Changing any control switches the panel's label to "Custom grade". **Reset** ret
 
 ### Weather
 
+**Lightning nearby**
+
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Lightning in the storm clouds | On or off | On | Turns automatic lightning on or off |
@@ -141,16 +143,42 @@ Changing any control switches the panel's label to "Custom grade". **Reset** ret
 | Minimum gap | 2.5 s to 3 min, logarithmic | 40 s | The shortest quiet spell before lightning can flash again, the first flash after loading included. At the far left, storms may flash in quick bursts, with a 30% chance of a follow-up flash within about two seconds. Any higher setting turns bursts off, so the gap holds between every pair of flashes |
 | Flash now | Button | | Sends a flash immediately, like `L`. It ignores the minimum gap |
 
+**Distant storms**
+
+Storms far beyond the horizon flicker silently now and then, lighting the sky low over the horizon. Each storm keeps flashing from one direction for a while, then another builds somewhere else in view.
+
+| Control | Range | Default | What it does |
+| --- | --- | --- | --- |
+| How often | Off to 12 per minute | 3 per minute | The average rate of distant flashes. The readout shows the average wait, such as "every ~20 s" |
+| Brightness | ×0.1 to ×3 | ×1 | How bright the glow gets. Each storm also has its own strength, as some are nearer than others |
+| Width | ×0.4 to ×3 | ×1 | How wide the glow spreads. At ×1 it reaches about 1.7° to 4° to either side, varying by storm |
+| Height | ×0.4 to ×3 | ×1 | How high above the horizon the glow reaches. At ×1 it fades over 1° to 2° |
+| Colour | Cool to Warm | Warm | The glow's colour, from blue-white to orange. Brightness stays the same across the range |
+| Flicker | Single pulse to 8 pulses | Up to 5 | The most pulses one flash can have. Each flash picks a random number up to this, and each pulse lights a slightly different part of the storm |
+| Flash length | ×0.4 to ×3 | ×1 | How long a flash's train of pulses lasts, and how slowly each pulse fades. At ×1 a flash lasts up to about a second |
+| Storm moves on after | 10 s to 5 min | ~75 s | The average time a storm keeps flashing from one place before the next storm appears somewhere else |
+| Spread across the view | 10% to 100% | 85% | How far from the centre of the view a new storm can appear, as a share of the distance to the edge. Storms always keep at least 10° clear of the moon |
+| Light on nearer clouds | None to ×3 | ×1 | How much the glow catches the thin edges of clouds in front of it and washes over the nearer clouds |
+| Reset | Button | | Returns every distant-storm setting to its default |
+| Distant flash | Button | | Sends a distant flash immediately from a new position, like `Shift`+`L` |
+
 ### Sky
+
+**Stars**
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Twinkle | Steady 0 to Strong ×2 | ×1.40 | How much the stars flicker. Twinkling is always deeper near the horizon, where starlight passes through more air |
 | Stars reach down to | 0° to about 20° above the horizon | 2.0° | The lowest elevation at which stars appear (stored as the sine of the angle, 0 to 0.35) |
-| Shooting stars | Off to 6 per minute | 2 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely |
+
+**Shooting stars**
+
+| Control | Range | Default | What it does |
+| --- | --- | --- | --- |
+| How often | Off to 6 per minute | 2 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely |
 | Shooting star | Button | | Sends a shooting star immediately, like `M` |
 
-### Ground
+**Ground**
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -171,7 +199,7 @@ The page has a soft, endless wind and low thunder that follows each lightning fl
 
 Sound pauses while the page is hidden, for example in a background tab, and resumes when it is shown again.
 
-### Performance
+### Display
 
 | Item | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -183,15 +211,17 @@ Sound pauses while the page is hidden, for example in a background tab, and resu
 
 ### Saved settings
 
-All settings are saved per browser in `localStorage`, under five keys:
+All settings are saved per browser in `localStorage`, under these keys:
 
 | Key | Holds |
 | --- | --- |
 | `moonlit-cloud-sea:grade:v1` | Colour grade and selected preset |
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
+| `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:sky:v1` | Twinkle, star reach, shooting star rate and town light brightness |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
+| `moonlit-cloud-sea:tab` | The settings tab you used last |
 
 To return everything to the defaults, clear the site's storage in the browser, or run `localStorage.clear()` in its developer console and reload.
 
@@ -226,6 +256,8 @@ To return everything to the defaults, clear the site's storage in the browser, o
 - **In-cloud flashes** make up the rest. They fire between charge regions near the tower's surface as a train of pulses that wander along the channel. On towers with an anvil, some run as "crawlers" just under the anvil base.
 
 Each flash lights the cloud from inside along its channel. Light from a buried channel scatters many times before it escapes, so it fades far more gently than direct moonlight and spreads through the whole tower. A ground strike also lights the land, water and rainy air around its strike point. The visible bolt is drawn at full resolution as a jagged, branching channel, and cloud in front of it hides or veils it.
+
+**Distant storms.** Now and then a storm far beyond the horizon, too far away to hear, flickers. Its light shows as a soft glow low in the sky, sitting behind the cloud layer, so the distant cloud tops stand out dark against it while their thin edges catch a little of the light. A flash is a short train of soft pulses, each lighting a slightly different part of the storm. A storm stays in one direction for a while before another builds elsewhere in view, so flashes repeat from the same place as a real storm's would.
 
 **Sound.** The wind is pink noise, which has equal energy in every octave, like a steady rush of air. A low-pass filter whose cutoff rises and falls with the gusts shapes it. Two narrow band-pass filters on the same noise give the whistle. Their pitch drifts with the gusts, and they only sound when the wind is strong. The gusts come from three slow swells whose periods never line up, so the pattern never repeats.
 
@@ -322,11 +354,11 @@ The configuration file accepts these fields:
 | `crf`, `preset` | x264 quality and speed settings |
 | `seed` | Random seed |
 | `storage` | Optional saved settings to load, keyed by the `localStorage` keys listed in [Saved settings](#saved-settings) |
-| `events` | Scripts to run at given times. `__pick(kind, test)` re-rolls a flash of kind `deep`, `cg` (ground strike) or `ic` (in-cloud) until `test` accepts it, and `window.__cloudScene.meteor(fireball)` sends a shooting star |
+| `events` | Scripts to run at given times. `__pick(kind, test)` re-rolls a flash of kind `deep`, `cg` (ground strike) or `ic` (in-cloud) until `test` accepts it, `window.__cloudScene.meteor(fireball)` sends a shooting star, and `window.__cloudScene.farFlash()` sends a distant storm flash |
 | `out` | Output file, relative to the configuration file |
 | `frames` | Optional folder, relative to the configuration file, to save numbered PNG frames in instead of making a video, for example to build a GIF |
 
-Automatic lightning and shooting stars are disabled while recording, so only the scripted events happen. Recordings are silent. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
+Automatic lightning, distant storms and shooting stars are disabled while recording, so only the scripted events happen. Recordings are silent. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
 
 ## Optimisations still to make
 
@@ -378,6 +410,8 @@ The scene was built iteratively from a short brief and reference photos of moonl
 24. **Lightning minimum gap.** A control for the shortest time between flashes.
 25. **Video recorder.** An offline, deterministic recorder for making videos of the scene.
 26. **Sound.** Synthesised wind with a whistle in the gusts, and delayed thunder after each lightning flash, with controls.
+27. **Distant storms.** Silent flickers of lightning beyond the horizon, with detailed controls.
+28. **Settings tabs.** The settings panel was organised into five tabs.
 
 ## Files
 

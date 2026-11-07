@@ -84,10 +84,20 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   }
   #grade.open .body { display: block; }
-  #grade h2 {
-    margin: 0 0 10px; font: italic 400 16px/1.2 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-    letter-spacing: 0.01em;
+  #grade .tabs {
+    position: sticky; top: -14px; z-index: 1; display: flex; gap: 2px;
+    margin: -14px -14px 6px; padding: 10px 10px 8px;
+    background: rgba(8, 20, 24, 0.96); border-bottom: 1px solid var(--panel-line); border-radius: 14px 14px 0 0;
   }
+  #grade .tabs button {
+    flex: 1; font: inherit; font-size: 11.5px; padding: 6px 0; border-radius: 8px; cursor: pointer;
+    color: var(--panel-muted); background: transparent; border: 1px solid transparent;
+  }
+  #grade .tabs button:hover { color: var(--panel-fg); border-color: var(--panel-line); }
+  #grade .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #062421; }
+  #grade .pane > .sec:first-child, #grade .pane > .check:first-child { margin-top: 6px; }
+  #grade .pane > .presets:first-child { margin-top: 8px; }
+  #grade .foot .btns { display: flex; gap: 6px; }
   #grade .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
   #grade .presets button {
     font: inherit; font-size: 11.5px; color: var(--panel-fg); cursor: pointer;
@@ -121,10 +131,10 @@
 </style>
 </head>
 <body>
-<div id="hint">Double-click for full screen · G for colour grade · L for lightning · S for sound</div>
+<div id="hint">Double-click for full screen · G for settings · L for lightning · S for sound</div>
 <div id="status">Lighting the clouds…</div>
-<div id="grade" aria-label="Colour grade controls">
-  <button class="toggle" type="button" aria-expanded="false" aria-controls="grade-body" title="Colour grade (G)">
+<div id="grade" aria-label="Settings">
+  <button class="toggle" type="button" aria-expanded="false" aria-controls="grade-body" title="Settings (G)">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
       <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>
     </svg>
@@ -1304,6 +1314,9 @@ uniform float uTanHalf, uAspect, uTime, uFrame, uPixAng, uMoonR, uExposure, uMoo
 uniform float uTwinkle, uStarLow;   // Sky panel: how much stars twinkle, how low they reach
 uniform vec3 uMetA, uMetB;   // a shooting star: where it starts and where it would end on the sky
 uniform vec4 uMet;           // progress 0..1, brightness, trail length (fraction of the path), 1 while one is up
+uniform vec4 uFar;           // a storm beyond the horizon: its direction (level) and how bright it is flashing now
+uniform vec3 uFarShape;      // the glow's half-width (radians across), centre height and height scale (radians)
+uniform vec4 uFarCol;        // the glow's colour, and how much it lights the nearer clouds
 uniform sampler2D uMoonMap;
 uniform vec3 uBalance, uShadowTint, uHighTint;
 uniform float uShadowAmt, uHighAmt, uLift, uSat, uContrast, uVignette, uGrain, uRays;
@@ -1459,6 +1472,15 @@ void main(){
   if (uBoltOn > 0.0) col += texture2D(tBolt, vUv).rgb * 32.0;
   float fa = max(dot(rd, uFlashDir), 0.0);
   col += uSkyFlash * c.a * (0.2 + 0.8 * fa * fa * fa * fa);
+  // A storm far beyond the horizon: its flashes light the air above it as a soft, warm
+  // glow low in the sky. Distant clouds stand out against it, their thin edges catch
+  // a little of the light, and the clouds in front pick up a faint wash.
+  if (uFar.w > 0.0){
+    float daz = acos(clamp(dot(normalize(rd.xz + 1e-5), normalize(uFar.xz)), -1.0, 1.0)) / uFarShape.x;
+    float up = asin(clamp(rd.y, -1.0, 1.0)) - uFarShape.y;
+    float g = exp(-daz * daz) * (up > 0.0 ? exp(-up / uFarShape.z) : exp(-4.0 * up * up / (uFarShape.z * uFarShape.z)));
+    col += uFarCol.rgb * uFar.w * g * (c.a + uFarCol.w * (2.5 * c.a * (1.0 - c.a) + 0.06));
+  }
   float rays = texture2D(tRays, vUv).r;
   col += rays * vec3(0.74, 0.80, 0.95) * 0.6 * uRays * (1.0 - 0.8 * diskMask * c.a);
 
@@ -1669,7 +1691,8 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   uHighTint: { value: new THREE.Vector3(1, 1, 1) }, uShadowAmt: { value: 0 }, uHighAmt: { value: 0 },
   uLift: { value: 0 }, uSat: { value: 1 }, uContrast: { value: 1 }, uVignette: { value: 0.38 },
   uGrain: { value: 0.007 }, uRays: { value: 1 },
-  tBolt: { value: null }, uBoltOn: { value: 0 }, uSkyFlash: { value: new THREE.Vector3() }, uFlashDir: { value: new THREE.Vector3(0, 1, 0) }
+  tBolt: { value: null }, uBoltOn: { value: 0 }, uSkyFlash: { value: new THREE.Vector3() }, uFlashDir: { value: new THREE.Vector3(0, 1, 0) },
+  uFar: { value: new THREE.Vector4(0, 0, -1, 0) }, uFarShape: { value: new THREE.Vector3(0.1, 0, 0.04) }, uFarCol: { value: new THREE.Vector4(1, 0.84, 0.74, 1) }
 }, camU));
 
 // NASA LRO lunar albedo map (public domain), 512 x 256, embedded
@@ -2305,6 +2328,7 @@ function render(dt) {
   updateCamera(simT, aspect);
   const boltOn = updateLightning(dt);
   updateMeteor(dt);
+  updateFar(dt);
   updateSound();
 
   // moon position on screen for the light shafts
@@ -2468,75 +2492,97 @@ const gradeEl = document.getElementById('grade');
 const gradeBody = document.getElementById('grade-body');
 const gradeToggle = gradeEl.querySelector('.toggle');
 const fmt = (c, v) => c.key === 'grain' ? (v * 1000).toFixed(0) : (c.min < 0 ? (v > 0 ? '+' : '') + v.toFixed(2) : v.toFixed(2));
+const TABS = [['colour', 'Colour'], ['weather', 'Weather'], ['sky', 'Sky'], ['sound', 'Sound'], ['display', 'Display']];
+const TAB_STORE = 'moonlit-cloud-sea:tab';
 function buildPanel() {
-  let html = '<h2>Colour grade</h2><div class="presets" role="group" aria-label="Presets">';
-  for (const name in GRADE_PRESETS) html += `<button type="button" data-preset="${name}">${name}</button>`;
-  html += '</div>';
-  for (const c of GRADE_CONTROLS) {
-    if (c.sec) { html += `<div class="sec">${c.sec}</div>`; continue; }
-    const id = 'g-' + c.key;
-    html += `<div class="row"><label for="${id}">${c.label}</label><output id="${id}-v"></output><div class="ctl">`;
-    html += `<input type="range" id="${id}" min="${c.min}" max="${c.max}" step="${c.step}" data-key="${c.key}">`;
-    if (c.color) html += `<input type="color" id="g-${c.color}" data-color="${c.color}" aria-label="${c.label} colour">`;
-    html += '</div>';
-    if (c.ends) html += `<div class="ends"><span>${c.ends[0]}</span><span>${c.ends[1]}</span></div>`;
-    html += '</div>';
-  }
-  html += '<div class="foot"><span id="g-name"></span><button type="button" id="g-reset">Reset</button></div>';
-  html += `<div class="sec">Weather</div>
-    <label class="check"><input type="checkbox" id="w-on"> Lightning in the storm clouds</label>
-    <div class="row"><label for="w-rate">Storm activity</label><output id="w-rate-v"></output>
-      <div class="ctl"><input type="range" id="w-rate" min="0.25" max="3" step="0.05"></div>
-      <div class="ends"><span>Rare</span><span>Frequent</span></div>
-    </div>
-    <div class="row"><label for="w-gap">Minimum gap</label><output id="w-gap-v"></output>
-      <div class="ctl"><input type="range" id="w-gap" min="0" max="1" step="0.01"></div>
-      <div class="ends"><span>Bursts</span><span>3 min</span></div>
-    </div>
-    <div class="foot" style="margin-top:6px"><span>L sends a flash now</span><button type="button" id="w-now">Flash now</button></div>`;
-  html += `<div class="sec">Sky</div>
-    <div class="row"><label for="s-twinkle">Twinkle</label><output id="s-twinkle-v"></output>
-      <div class="ctl"><input type="range" id="s-twinkle" min="0" max="2" step="0.05"></div>
-      <div class="ends"><span>Steady</span><span>Strong</span></div>
-    </div>
-    <div class="row"><label for="s-low">Stars reach down to</label><output id="s-low-v"></output>
-      <div class="ctl"><input type="range" id="s-low" min="0" max="0.35" step="0.005"></div>
-      <div class="ends"><span>Horizon</span><span>Higher</span></div>
-    </div>
-    <div class="row"><label for="s-meteors">Shooting stars</label><output id="s-meteors-v"></output>
-      <div class="ctl"><input type="range" id="s-meteors" min="0" max="6" step="0.1"></div>
-      <div class="ends"><span>Off</span><span>Often</span></div>
-    </div>
-    <div class="foot" style="margin-top:6px"><span>M sends one now</span><button type="button" id="s-met-now">Shooting star</button></div>`;
-  html += `<div class="sec">Ground</div>
-    <div class="row"><label for="s-lamps">Town lights</label><output id="s-lamps-v"></output>
-      <div class="ctl"><input type="range" id="s-lamps" min="0" max="3" step="0.05"></div>
-      <div class="ends"><span>Off</span><span>Bright</span></div>
-    </div>`;
-  const aRow = (k, label, max, step, lo, hi) => `<div class="row"><label for="a-${k}">${label}</label><output id="a-${k}-v"></output>
-      <div class="ctl"><input type="range" id="a-${k}" min="0" max="${max}" step="${step}"></div>
+  // one slider row: id, label, range and the words at each end
+  const row = (id, label, min, max, step, lo, hi) => `<div class="row"><label for="${id}">${label}</label><output id="${id}-v"></output>
+      <div class="ctl"><input type="range" id="${id}" min="${min}" max="${max}" step="${step}"></div>
       <div class="ends"><span>${lo}</span><span>${hi}</span></div>
     </div>`;
-  html += `<div class="sec">Sound</div>
-    <label class="check"><input type="checkbox" id="a-on"> Wind and thunder</label>
-    ${aRow('volume', 'Volume', 1, 0.01, 'Quiet', 'Loud')}
-    ${aRow('wind', 'Wind', 1, 0.01, 'Off', 'Strong')}
-    ${aRow('whistle', 'Whistle in the gusts', 1, 0.01, 'Off', 'Strong')}
-    ${aRow('thunder', 'Thunder', 1, 0.01, 'Off', 'Strong')}
-    ${aRow('delay', 'Thunder delay', 2, 0.05, 'None', 'Longer')}
-    <div class="foot" style="margin-top:6px"><span id="a-note"></span></div>`;
-  html += `<div class="sec">Performance</div>
+  const foot = (note, buttons) => `<div class="foot"><span>${note}</span><span class="btns">${buttons}</span></div>`;
+  const pane = {};
+
+  let h = '<div class="presets" role="group" aria-label="Presets">';
+  for (const name in GRADE_PRESETS) h += `<button type="button" data-preset="${name}">${name}</button>`;
+  h += '</div>';
+  for (const c of GRADE_CONTROLS) {
+    if (c.sec) { h += `<div class="sec">${c.sec}</div>`; continue; }
+    const id = 'g-' + c.key;
+    h += `<div class="row"><label for="${id}">${c.label}</label><output id="${id}-v"></output><div class="ctl">`;
+    h += `<input type="range" id="${id}" min="${c.min}" max="${c.max}" step="${c.step}" data-key="${c.key}">`;
+    if (c.color) h += `<input type="color" id="g-${c.color}" data-color="${c.color}" aria-label="${c.label} colour">`;
+    h += '</div>';
+    if (c.ends) h += `<div class="ends"><span>${c.ends[0]}</span><span>${c.ends[1]}</span></div>`;
+    h += '</div>';
+  }
+  h += '<div class="foot"><span id="g-name"></span><button type="button" id="g-reset">Reset</button></div>';
+  pane.colour = h;
+
+  pane.weather = `<div class="sec">Lightning nearby</div>
+    <label class="check"><input type="checkbox" id="w-on"> Lightning in the storm clouds</label>
+    ${row('w-rate', 'Storm activity', 0.25, 3, 0.05, 'Rare', 'Frequent')}
+    ${row('w-gap', 'Minimum gap', 0, 1, 0.01, 'Bursts', '3 min')}
+    ${foot('L sends a flash now', '<button type="button" id="w-now">Flash now</button>')}
+    <div class="sec">Distant storms</div>
+    ${row('d-rate', 'How often', 0, 12, 0.25, 'Off', 'Often')}
+    ${row('d-bright', 'Brightness', 0.1, 3, 0.05, 'Faint', 'Bright')}
+    ${row('d-width', 'Width', 0.4, 3, 0.05, 'Narrow', 'Wide')}
+    ${row('d-height', 'Height', 0.4, 3, 0.05, 'Low', 'Tall')}
+    ${row('d-warmth', 'Colour', 0, 1, 0.01, 'Cool', 'Warm')}
+    ${row('d-flicker', 'Flicker', 1, 8, 1, 'Single', 'Many pulses')}
+    ${row('d-length', 'Flash length', 0.4, 3, 0.05, 'Short', 'Long')}
+    ${row('d-stay', 'Storm moves on after', 10, 300, 5, '10 s', '5 min')}
+    ${row('d-spread', 'Spread across the view', 0.1, 1, 0.01, 'Centre', 'Edges')}
+    ${row('d-wash', 'Light on nearer clouds', 0, 3, 0.05, 'None', 'Strong')}
+    ${foot('Shift+L sends one now', '<button type="button" id="d-reset">Reset</button><button type="button" id="w-far-now">Distant flash</button>')}`;
+
+  pane.sky = `<div class="sec">Stars</div>
+    ${row('s-twinkle', 'Twinkle', 0, 2, 0.05, 'Steady', 'Strong')}
+    ${row('s-low', 'Stars reach down to', 0, 0.35, 0.005, 'Horizon', 'Higher')}
+    <div class="sec">Shooting stars</div>
+    ${row('s-meteors', 'How often', 0, 6, 0.1, 'Off', 'Often')}
+    ${foot('M sends one now', '<button type="button" id="s-met-now">Shooting star</button>')}
+    <div class="sec">Ground</div>
+    ${row('s-lamps', 'Town lights', 0, 3, 0.05, 'Off', 'Bright')}`;
+
+  pane.sound = `<label class="check"><input type="checkbox" id="a-on"> Wind and thunder</label>
+    ${row('a-volume', 'Volume', 0, 1, 0.01, 'Quiet', 'Loud')}
+    <div class="sec">Wind</div>
+    ${row('a-wind', 'Wind', 0, 1, 0.01, 'Off', 'Strong')}
+    ${row('a-whistle', 'Whistle in the gusts', 0, 1, 0.01, 'Off', 'Strong')}
+    <div class="sec">Thunder</div>
+    ${row('a-thunder', 'Thunder', 0, 1, 0.01, 'Off', 'Strong')}
+    ${row('a-delay', 'Thunder delay', 0, 2, 0.05, 'None', 'Longer')}
+    <div class="foot"><span id="a-note"></span></div>`;
+
+  pane.display = `<div class="sec">Performance</div>
     <div class="stats" aria-live="off">
       <span>Clouds</span><b id="q-cloud">–</b>
       <span>Screen</span><b id="q-screen">–</b>
       <span>Frame rate</span><b id="q-fps">–</b>
     </div>
-    <div class="row"><label for="q-scale">Cloud resolution</label><output id="q-scale-v"></output>
-      <div class="ctl"><input type="range" id="q-scale" min="15" max="100" step="1"></div>
-      <div class="ends"><span>Faster</span><span>Sharper</span></div>
-    </div>
+    ${row('q-scale', 'Cloud resolution', 15, 100, 1, 'Faster', 'Sharper')}
     <label class="check"><input type="checkbox" id="q-auto"> Adjust automatically to keep motion smooth</label>`;
+
+  let html = '<div class="tabs" role="tablist" aria-label="Settings">';
+  for (const [k, label] of TABS) html += `<button type="button" role="tab" id="tab-${k}" aria-controls="pane-${k}" data-tab="${k}">${label}</button>`;
+  html += '</div>';
+  for (const [k] of TABS) html += `<div class="pane" role="tabpanel" id="pane-${k}" aria-labelledby="tab-${k}">${pane[k]}</div>`;
   gradeBody.innerHTML = html;
+}
+// show one tab; remembered per viewer
+function showTab(k, focus) {
+  if (!TABS.some(t => t[0] === k)) k = TABS[0][0];
+  for (const [t] of TABS) {
+    const on = t === k, b = document.getElementById('tab-' + t);
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+    document.getElementById('pane-' + t).hidden = !on;
+  }
+  if (focus) document.getElementById('tab-' + k).focus();
+  gradeBody.scrollTop = 0;
+  try { localStorage.setItem(TAB_STORE, k); } catch (e) {}
 }
 function syncPanel() {
   for (const c of GRADE_CONTROLS) {
@@ -2550,10 +2596,20 @@ function syncPanel() {
   document.getElementById('g-name').textContent = grade.preset === 'Custom' ? 'Custom grade' : grade.preset;
 }
 buildPanel(); syncPanel(); applyGrade();
+gradeBody.addEventListener('keydown', e => {
+  const k = e.target.dataset && e.target.dataset.tab;
+  if (!k || !/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) return;
+  const i = TABS.findIndex(t => t[0] === k), n = TABS.length;
+  const j = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : (i + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+  showTab(TABS[j][0], true);
+  e.preventDefault();
+});
+{ let t = null; try { t = localStorage.getItem(TAB_STORE); } catch (e) {} showTab(t); }
 gradeBody.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
+  if (t.id.startsWith('d-')) { onFarInput(t); return; }
   if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
@@ -2565,7 +2621,10 @@ gradeBody.addEventListener('input', e => {
 gradeBody.addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.dataset.tab) { showTab(b.dataset.tab); return; }
   if (b.id === 'w-now') { flashNow(); return; }
+  if (b.id === 'w-far-now') { farNow(); return; }
+  if (b.id === 'd-reset') { resetFar(); return; }
   if (b.id === 's-met-now') { launchMeteor(); return; }
   const name = b.dataset.preset || (b.id === 'g-reset' ? (grade.preset in GRADE_PRESETS ? grade.preset : GRADE_DEFAULT) : null);
   if (!name) return;
@@ -2581,7 +2640,8 @@ window.addEventListener('keydown', e => {
   if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
   if (e.key === 'g' || e.key === 'G') setPanel(!gradeEl.classList.contains('open'));
   if (e.key === 'Escape') setPanel(false);
-  if (e.key === 'l' || e.key === 'L') flashNow();
+  if (e.key === 'L' && e.shiftKey) farNow();
+  else if (e.key === 'l' || e.key === 'L') flashNow();
   if (e.key === 'm' || e.key === 'M') launchMeteor();
   if (e.key === 's' || e.key === 'S') { if (sound.on && !soundLive()) startSound(); else setSoundOn(!sound.on); }
 });
@@ -2683,6 +2743,100 @@ function flashNow() {
 }
 syncStorm();
 if (storm.minGap > 2.5) nextFlash = Math.max(nextFlash, flashGap());   // the first flash waits too
+
+/* ---------------------------------------------------------------------------
+   Distant storms: a storm far beyond the horizon, too far to hear, sits in one
+   direction for a while and now and then flickers, lighting the sky above it. Then
+   another builds somewhere else in view, clear of the moon. Every part of it has a
+   control in the panel, saved per viewer.
+--------------------------------------------------------------------------- */
+const FAR_STORE = 'moonlit-cloud-sea:distant:v1';
+const FAR_DEFAULT = { rate: 3, bright: 1, width: 1, height: 1, warmth: 0.6, flicker: 5, length: 1, stay: 75, spread: 0.85, wash: 1 };
+let farCfg = Object.assign({}, FAR_DEFAULT);
+try { const d = JSON.parse(localStorage.getItem(FAR_STORE) || 'null'); if (d && d.rate >= 0) farCfg = Object.assign(farCfg, d); } catch (e) {}
+const far = { cell: null, on: false, t0: 0, strokes: null, dur: 0, next: Infinity };
+function farGap() { return farCfg.rate > 0 ? -Math.log(1 - Math.random()) * 60 / farCfg.rate : Infinity; }
+function newFarCell() {
+  // anywhere across the current view (the camera's heading, out to the Spread share of
+  // the half-width of the view), clear of the moon; fixed in the world once placed
+  const F = camU.uCamF.value, head = Math.atan2(F.x, -F.z);
+  const half = Math.atan(camU.uTanHalf.value * camU.uAspect.value) * farCfg.spread;
+  const moonAz = Math.atan2(MOON_DIR.x, -MOON_DIR.z);
+  let az = head;
+  for (let i = 0; i < 20; i++) { az = head + (Math.random() * 2 - 1) * half; if (Math.abs(az - moonAz) > 0.17) break; }
+  far.cell = {
+    az, end: clock + farCfg.stay * (0.4 + Math.random() * 1.2),   // how long it keeps flashing from here
+    w: 0.03 + Math.random() * 0.04,                     // half-width at ×1: about 1.7 to 4 degrees
+    y: -0.01 + Math.random() * 0.015,                    // centre: within a degree of the horizon line
+    h: 0.018 + Math.random() * 0.017,                    // height at ×1: 1 to 2 degrees
+    bright: 0.5 + Math.random() * 0.5                    // nearer storms flash brighter
+  };
+}
+function farFlash() {
+  if (!far.cell || clock > far.cell.end) newFarCell();
+  const c = far.cell, strokes = [];
+  // a short train of soft pulses, each lighting a slightly different part of the storm
+  const n = reduceMotion ? 1 : 1 + Math.floor(Math.random() * Math.round(farCfg.flicker));
+  const span = (0.2 + Math.random() * 1.0) * farCfg.length;
+  for (let k = 0; k < n; k++) strokes.push({
+    t: k === 0 ? 0 : Math.random() * span, peak: (k ? 0.3 + Math.random() * 0.7 : 1) * c.bright,
+    tau: (reduceMotion ? 0.35 : 0.06 + Math.random() * 0.16) * Math.sqrt(farCfg.length), cc: 0, ccDur: 0,
+    daz: (Math.random() - 0.5) * 0.6, dy: Math.random() * 0.012
+  });
+  strokes.sort((p, q) => p.t - q.t);
+  Object.assign(far, { on: true, t0: clock, strokes, dur: strokes[n - 1].t + 1.5 * Math.sqrt(farCfg.length) });
+}
+function updateFar(dt) {
+  const u = compPass.u;
+  if (!far.on) {
+    u.uFar.value.w = 0;
+    if (!DBG && clock >= far.next) { farFlash(); far.next = clock + farGap(); }
+    if (!far.on) return;
+  }
+  const age = clock - far.t0;
+  if (age > far.dur) { far.on = false; u.uFar.value.w = 0; return; }
+  let env = 0, top = 0, topSt = far.strokes[0];
+  for (const st of far.strokes) { const v = pulse(st, age, dt); env += v; if (v > top) { top = v; topSt = st; } }
+  const c = far.cell, w = c.w * farCfg.width, az = c.az + topSt.daz * w;
+  u.uFar.value.set(Math.sin(az), 0, -Math.cos(az), env * 0.16 * farCfg.bright);
+  u.uFarShape.value.set(w, c.y + topSt.dy * farCfg.height, c.h * farCfg.height);
+}
+function farNow() { if (baked && !far.on) { newFarCell(); farFlash(); } }   // on demand: each one somewhere new
+
+// the glow's colour, from cool blue-white to warm orange at the same brightness
+function farColour() {
+  const t = farCfg.warmth, c = [0.80 + 0.20 * t, 0.88 - 0.16 * t, 1.00 - 0.45 * t];
+  const k = 0.866 / (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
+  compPass.u.uFarCol.value.set(c[0] * k, c[1] * k, c[2] * k, farCfg.wash);
+}
+const FAR_READ = {
+  rate: v => v === 0 ? 'off' : 60 / v >= 90 ? 'every ~' + +(60 / v / 60).toFixed(1) + ' min' : 'every ~' + Math.round(60 / v) + ' s',
+  bright: v => '×' + v.toFixed(2), width: v => '×' + v.toFixed(2), height: v => '×' + v.toFixed(2),
+  warmth: v => v < 0.2 ? 'cool' : v < 0.4 ? 'cool white' : v < 0.55 ? 'white' : v < 0.8 ? 'warm' : 'orange',
+  flicker: v => Math.round(v) === 1 ? 'single pulse' : 'up to ' + Math.round(v) + ' pulses',
+  length: v => '×' + v.toFixed(2),
+  stay: v => v < 90 ? '~' + Math.round(v) + ' s' : '~' + +(v / 60).toFixed(1) + ' min',
+  spread: v => Math.round(v * 100) + '% of the view',
+  wash: v => v === 0 ? 'off' : '×' + v.toFixed(2)
+};
+function syncFar() {
+  for (const k in FAR_READ) {
+    document.getElementById('d-' + k).value = farCfg[k];
+    document.getElementById('d-' + k + '-v').textContent = FAR_READ[k](+farCfg[k]);
+  }
+  farColour();
+}
+function saveFar() { try { localStorage.setItem(FAR_STORE, JSON.stringify(farCfg)); } catch (e) {} }
+function onFarInput(t) {
+  const k = t.id.slice(2);
+  farCfg[k] = parseFloat(t.value);
+  if (k === 'rate') far.next = clock + farGap();
+  if (k === 'stay' && far.cell) far.cell.end = Math.min(far.cell.end, clock + farCfg.stay);
+  saveFar(); syncFar();
+}
+function resetFar() { farCfg = Object.assign({}, FAR_DEFAULT); far.next = clock + farGap(); saveFar(); syncFar(); }
+syncFar();
+far.next = clock + 4 + farGap();
 
 /* ---------------------------------------------------------------------------
    Sky and ground: how much the stars twinkle, how close to the horizon they reach,
@@ -2963,6 +3117,8 @@ window.__cloudScene = {
   // recording: move time on by dt seconds and draw one frame; send a shooting star now
   advance: dt => { simT += dt * (reduceMotion ? 0.35 : 1.0); clock += dt; frame++; render(dt); renderer.getContext().finish(); },
   meteor: fire => { launchMeteor(fire === true); return met.on; },
+  farFlash: () => { farFlash(); return Object.assign({}, far.cell); },
+  farState: () => ({ on: far.on, u: compPass.u.uFar.value.toArray(), shape: compPass.u.uFarShape.value.toArray(), inShader: !!compPass.u.uFar }),
   // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
   strike: (kind, hold) => { if (flash) endFlash(); return startFlash(kind || 'cg', { hold }); },
   holdFlash: age => { if (flash) flash.hold = age; },
