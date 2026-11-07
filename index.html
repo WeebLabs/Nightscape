@@ -121,7 +121,7 @@
 </style>
 </head>
 <body>
-<div id="hint">Double-click for full screen · G for colour grade · L for lightning</div>
+<div id="hint">Double-click for full screen · G for colour grade · L for lightning · S for sound</div>
 <div id="status">Lighting the clouds…</div>
 <div id="grade" aria-label="Colour grade controls">
   <button class="toggle" type="button" aria-expanded="false" aria-controls="grade-body" title="Colour grade (G)">
@@ -2207,6 +2207,7 @@ function startFlash(kind, opts) {
   setBoltMesh(ev.deep ? null : ev.lines);
   lastStorm = cb.key;
   flash = ev;
+  thunder(ev);
   return { kind: ev.deep ? 'deep' : ev.kind, at: ev.centre.map(v => +v.toFixed(1)), visible: +ev.vis.toFixed(2), strokes: ev.strokes.length, segments: boltMesh ? boltMesh.geometry.index.count / 6 : 0 };
 }
 // roughly two in three flashes are buried deep in the cloud, one in five strikes the sea
@@ -2304,6 +2305,7 @@ function render(dt) {
   updateCamera(simT, aspect);
   const boltOn = updateLightning(dt);
   updateMeteor(dt);
+  updateSound();
 
   // moon position on screen for the light shafts
   const f = camU.uCamF.value, r = camU.uCamR.value, u = camU.uCamU.value;
@@ -2511,6 +2513,18 @@ function buildPanel() {
       <div class="ctl"><input type="range" id="s-lamps" min="0" max="3" step="0.05"></div>
       <div class="ends"><span>Off</span><span>Bright</span></div>
     </div>`;
+  const aRow = (k, label, max, step, lo, hi) => `<div class="row"><label for="a-${k}">${label}</label><output id="a-${k}-v"></output>
+      <div class="ctl"><input type="range" id="a-${k}" min="0" max="${max}" step="${step}"></div>
+      <div class="ends"><span>${lo}</span><span>${hi}</span></div>
+    </div>`;
+  html += `<div class="sec">Sound</div>
+    <label class="check"><input type="checkbox" id="a-on"> Wind and thunder</label>
+    ${aRow('volume', 'Volume', 1, 0.01, 'Quiet', 'Loud')}
+    ${aRow('wind', 'Wind', 1, 0.01, 'Off', 'Strong')}
+    ${aRow('whistle', 'Whistle in the gusts', 1, 0.01, 'Off', 'Strong')}
+    ${aRow('thunder', 'Thunder', 1, 0.01, 'Off', 'Strong')}
+    ${aRow('delay', 'Thunder delay', 2, 0.05, 'None', 'Longer')}
+    <div class="foot" style="margin-top:6px"><span id="a-note"></span></div>`;
   html += `<div class="sec">Performance</div>
     <div class="stats" aria-live="off">
       <span>Clouds</span><b id="q-cloud">–</b>
@@ -2541,6 +2555,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors') { onSkyInput(t); return; }
+  if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
@@ -2568,6 +2583,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') setPanel(false);
   if (e.key === 'l' || e.key === 'L') flashNow();
   if (e.key === 'm' || e.key === 'M') launchMeteor();
+  if (e.key === 's' || e.key === 'S') { if (sound.on && !soundLive()) startSound(); else setSoundOn(!sound.on); }
 });
 // show the controls once the scene is up; hide cursor and closed button when idle
 let idleTimer = 0;
@@ -2744,6 +2760,187 @@ function updateMeteor(dt) {
 }
 syncSky();
 met.next = clock + meteorGap();
+
+/* ---------------------------------------------------------------------------
+   Sound: a soft wind that never stops, with a whistle that comes and goes in the
+   gusts, and low thunder that follows each lightning flash after a delay that grows
+   with its distance. All of it is synthesised from noise with the Web Audio API, so
+   there are no sound files. Browsers allow sound only after the viewer clicks or
+   presses a key, so it starts then, fading in.
+--------------------------------------------------------------------------- */
+const SOUND_STORE = 'moonlit-cloud-sea:sound:v1';
+let sound = { on: true, volume: 0.6, wind: 0.5, whistle: 0.4, thunder: 0.7, delay: 1 };
+try { const a = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null'); if (a && typeof a.on === 'boolean') sound = Object.assign(sound, a); } catch (e) {}
+const AC = window.AudioContext || window.webkitAudioContext;
+let au = null;   // the audio graph, built on the first click or key press
+
+// A looping stereo noise buffer, 'pink' for the wind or 'brown' for thunder. The loop
+// is seamless: the start is crossfaded (at equal power) with what would have followed
+// the end.
+function noiseBuffer(ctx, secs, colour) {
+  const sr = ctx.sampleRate, L = Math.round(secs * sr), F = Math.round(0.5 * sr);
+  const buf = ctx.createBuffer(2, L, sr), a = new Float32Array(L + F);
+  for (let ch = 0; ch < 2; ch++) {
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, br = 0;
+    for (let i = 0; i < L + F; i++) {
+      const w = Math.random() * 2 - 1;
+      if (colour === 'brown') { br = (br + 0.02 * w) / 1.02; a[i] = br * 3.5; continue; }
+      // Paul Kellet's pink-noise filter
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      a[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    const out = buf.getChannelData(ch);
+    for (let i = 0; i < L; i++) out[i] = i < F ? a[i] * Math.sqrt(i / F) + a[L + i] * Math.sqrt(1 - i / F) : a[i];
+  }
+  return buf;
+}
+function filter(ctx, type, f, q) {
+  const n = ctx.createBiquadFilter();
+  n.type = type; n.frequency.value = f; n.Q.value = q;
+  return n;
+}
+function buildAudio() {
+  const ctx = new AC();
+  const master = ctx.createGain(), comp = ctx.createDynamicsCompressor();
+  master.gain.value = 0;
+  // a gentle limiter, so overlapping thunder never gets harsh
+  comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.03; comp.release.value = 0.8;
+  master.connect(comp).connect(ctx.destination);
+  const windBus = ctx.createGain(), thunderBus = ctx.createGain();
+  windBus.connect(master); thunderBus.connect(master);
+  // The wind: pink noise under a slowly moving low-pass is the rush of air, and two
+  // narrow band-passes on the same noise, drifting in pitch, are the whistle.
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx, 12, 'pink'); src.loop = true;
+  const rushF = filter(ctx, 'lowpass', 500, 0.5), rushG = ctx.createGain();
+  src.connect(rushF).connect(rushG).connect(windBus);
+  const wh = [[720, 22], [1170, 30]].map(([f, q]) => {
+    const bp = filter(ctx, 'bandpass', f, q), g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(bp).connect(g).connect(windBus);
+    return { bp, g };
+  });
+  src.start();
+  au = { ctx, master, windBus, thunderBus, rushF, rushG, wh, brown: noiseBuffer(ctx, 10, 'brown'), nextMod: 0 };
+}
+function applySoundLevels(fade) {
+  if (!au) return;
+  const now = au.ctx.currentTime;
+  au.master.gain.setTargetAtTime(sound.on ? sound.volume * sound.volume : 0, now, fade || 0.1);
+  au.windBus.gain.setTargetAtTime(sound.wind * sound.wind, now, 0.1);
+  au.thunderBus.gain.setTargetAtTime(sound.thunder * sound.thunder * 1.6, now, 0.1);
+}
+const soundLive = () => !!au && au.ctx.state === 'running' && sound.on;
+function startSound() {
+  if (!sound.on || DBG || !AC) return;
+  if (!au) { try { buildAudio(); } catch (e) { return; } }
+  if (au.ctx.state !== 'running') au.ctx.resume().then(syncSound, () => {});
+  applySoundLevels(1.2);   // fade in over a few seconds
+  syncSound();
+}
+function setSoundOn(on) {
+  sound.on = on;
+  try { localStorage.setItem(SOUND_STORE, JSON.stringify(sound)); } catch (e) {}
+  if (on) startSound();
+  else if (au) {
+    applySoundLevels(0.25);
+    setTimeout(() => { if (!sound.on && au) au.ctx.suspend().then(syncSound); }, 1500);
+  }
+  syncSound();
+}
+// any click or key press may start the sound (S is handled by its own toggle)
+const soundGesture = e => { if (e.type === 'keydown' && (e.key === 's' || e.key === 'S')) return; if (!soundLive()) startSound(); };
+window.addEventListener('pointerdown', soundGesture, true);
+window.addEventListener('keydown', soundGesture, true);
+document.addEventListener('visibilitychange', () => {
+  if (!au) return;
+  if (document.hidden) au.ctx.suspend();
+  else if (sound.on) au.ctx.resume().then(syncSound, () => {});
+});
+
+// Every eighth of a second, steer the wind: gusts from a few slow swells whose periods
+// never line up (so the pattern never repeats), with the whistle rising in the gusts.
+function updateSound() {
+  if (!soundLive()) return;
+  const now = au.ctx.currentTime;
+  if (now < au.nextMod) return;
+  au.nextMod = now + 0.125;
+  const t = clock;
+  const gust = THREE.MathUtils.clamp(0.5 + 0.22 * Math.sin(t * 0.091 + 1.3) + 0.16 * Math.sin(t * 0.237 + 0.4) + 0.12 * Math.sin(t * 0.561 + 2.2), 0, 1);
+  au.rushG.gain.setTargetAtTime(0.45 + 0.55 * gust, now, 0.6);
+  au.rushF.frequency.setTargetAtTime(300 + 600 * gust, now, 0.6);
+  const rise = THREE.MathUtils.smoothstep(gust, 0.35, 0.9);
+  const f0 = 600 + 300 * gust + 35 * Math.sin(t * 0.73);
+  au.wh[0].bp.frequency.setTargetAtTime(f0, now, 0.4);
+  au.wh[1].bp.frequency.setTargetAtTime(f0 * 1.63 + 25 * Math.sin(t * 0.51 + 1.0), now, 0.4);
+  const w = sound.whistle * sound.whistle * 22;
+  au.wh[0].g.gain.setTargetAtTime(w * rise * (0.7 + 0.3 * Math.sin(t * 0.31)), now, 0.5);
+  au.wh[1].g.gain.setTargetAtTime(w * 0.55 * rise * rise * (0.6 + 0.4 * Math.sin(t * 0.43 + 2.0)), now, 0.5);
+}
+
+// Thunder for one flash: brown noise through two low-passes, opening with a soft swell
+// and rolling on in a few weaker waves. Distance delays it, makes it quieter and takes
+// away more of the higher rumble; a flash deep in the cloud sounds the most muffled.
+// It is panned towards the flash.
+function thunder(ev) {
+  if (!soundLive() || sound.thunder <= 0) return;
+  const ctx = au.ctx, cp = camU.uCamPos.value;
+  const dx = ev.centre[0] - cp.x, dy = ev.centre[1] - cp.y, dz = ev.centre[2] - cp.z;
+  const dist = Math.hypot(dx, dy, dz);
+  const kind = ev.deep ? 'deep' : ev.kind;
+  const t0 = ctx.currentTime + (0.8 + dist * 0.012) * sound.delay;
+  const loud = (kind === 'cg' ? 1 : kind === 'ic' ? 0.8 : 0.7) / (1 + dist / 160);
+  const cut = Math.max(130, (kind === 'cg' ? 340 : kind === 'ic' ? 270 : 200) * Math.exp(-dist / 700));
+  const T = 4.5 + Math.random() * 3.5 + dist * 0.008;
+  const src = ctx.createBufferSource();
+  src.buffer = au.brown; src.loop = true;
+  const g = ctx.createGain();
+  g.gain.value = 0;
+  let out = src.connect(filter(ctx, 'lowpass', cut, 0.7)).connect(filter(ctx, 'lowpass', cut * 1.5, 0.5)).connect(g);
+  if (ctx.createStereoPanner) {
+    const R = camU.uCamR.value, p = ctx.createStereoPanner();
+    p.pan.value = THREE.MathUtils.clamp((dx * R.x + dy * R.y + dz * R.z) / dist, -1, 1) * 0.7;
+    out = out.connect(p);
+  }
+  out.connect(au.thunderBus);
+  const G = g.gain, att = kind === 'cg' ? 0.15 + Math.random() * 0.15 : 0.35 + Math.random() * 0.4;
+  G.setValueAtTime(0, t0);
+  G.linearRampToValueAtTime(loud, t0 + att);
+  let t = t0 + att;
+  const n = 2 + Math.floor(Math.random() * 4), step = (T * 0.75 - att) / n;
+  for (let k = 1; k <= n; k++) {
+    const peak = loud * Math.pow(1 - k / (n + 1), 1.2) * (0.7 + 0.5 * Math.random());
+    G.linearRampToValueAtTime(peak * 0.45, t + step * (0.4 + 0.2 * Math.random()));
+    t += step;
+    G.linearRampToValueAtTime(peak, t);
+  }
+  G.setTargetAtTime(0, t, (t0 + T - t) / 3);
+  src.start(t0, Math.random() * 8);
+  src.stop(t0 + T + 1);
+  src.onended = () => g.disconnect();
+}
+
+const aOn = document.getElementById('a-on'), aNote = document.getElementById('a-note');
+const aSliders = ['volume', 'wind', 'whistle', 'thunder', 'delay'];
+function syncSound() {
+  aOn.checked = sound.on;
+  for (const k of aSliders) {
+    document.getElementById('a-' + k).value = sound[k];
+    document.getElementById('a-' + k + '-v').textContent = k === 'delay'
+      ? (sound.delay === 0 ? 'none' : '×' + (+sound.delay).toFixed(2))
+      : sound[k] === 0 ? 'off' : Math.round(sound[k] * 100) + '%';
+  }
+  aNote.textContent = !AC ? 'This browser has no Web Audio' : sound.on && !soundLive() ? 'Click anywhere to start sound' : 'S turns sound on or off';
+}
+function onSoundInput(t) {
+  if (t.id === 'a-on') { setSoundOn(t.checked); return; }
+  sound[t.id.slice(2)] = parseFloat(t.value);
+  try { localStorage.setItem(SOUND_STORE, JSON.stringify(sound)); } catch (e) {}
+  applySoundLevels();
+  syncSound();
+}
+syncSound();
 
 /* ---------------------------------------------------------------------------
    Full screen

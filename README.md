@@ -22,6 +22,7 @@ A live, endless flight just above a moonlit sea of clouds, rendered in real time
   - [Weather](#weather)
   - [Sky](#sky)
   - [Ground](#ground)
+  - [Sound](#sound)
   - [Performance](#performance)
   - [Saved settings](#saved-settings)
   - [Page options](#page-options)
@@ -53,7 +54,7 @@ The project is meant to be a live wallpaper that you can leave running for hours
 - **Live.** The scene is generated and animated in real time rather than played back from a video. The flight never cuts or loops visibly, and events such as lightning and shooting stars arrive at random.
 - **Calming.** Motion is slow and smooth. Changes are gradual, the palette is soft, and nothing on screen demands attention. Lightning is mostly dim glows deep inside the clouds, and both lightning and shooting stars can be made rarer or turned off.
 - **Realistic.** The clouds follow how real clouds form and how light scatters through them. The moon is the real near side, mapped from NASA lunar data. Stars twinkle more near the horizon, lightning behaves like real ground strikes and in-cloud flashes, and the ground is lit only where the cloud deck lets moonlight through.
-- **Semi-interactive.** The scene needs no input, but it responds gently when you give it some. Moving the mouse turns your gaze slightly. A panel lets you grade the colours and tune the weather, sky, ground and performance, and keys send a lightning flash or a shooting star on demand.
+- **Semi-interactive.** The scene needs no input, but it responds gently when you give it some. Moving the mouse turns your gaze slightly. A panel lets you grade the colours and tune the weather, sky, ground, sound and performance, and keys send a lightning flash or a shooting star on demand.
 
 A large share of the work has gone into stability. Clouds must not shimmer, boil, pop or change shape as the camera moves, because any of those breaks the calm at once.
 
@@ -93,6 +94,7 @@ Settings you choose in the panel are saved in that browser's local storage. A wa
 | `Esc` | Closes the settings panel |
 | `L` | Sends a lightning flash now |
 | `M` | Sends a shooting star now |
+| `S` | Turns sound on or off. If sound is on but has not started yet, it starts it |
 
 The keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
 
@@ -100,7 +102,7 @@ If your operating system is set to reduce motion, the flight runs at 35% of its 
 
 ## Settings
 
-Press `G` or click the corner button to open the panel. It has six sections, and every change takes effect immediately.
+Press `G` or click the corner button to open the panel. It has a section for each group of settings below, and every change takes effect immediately.
 
 ### Colour grade
 
@@ -154,6 +156,21 @@ Changing any control switches the panel's label to "Custom grade". **Reset** ret
 | --- | --- | --- | --- |
 | Town lights | Off to ×3 | ×1.95 | Brightness of the town, road and farmhouse lights and the glow they cast on the ground and lakes. It is a single multiplication at render time and needs no rebake. It does not affect the red mast lights |
 
+### Sound
+
+The page has a soft, endless wind and low thunder that follows each lightning flash. Both are generated in the browser from noise with the Web Audio API, so there are no sound files. Browsers only allow a page to play sound after you interact with it, so sound starts, fading in, on your first click or key press. Until then the panel shows "Click anywhere to start sound".
+
+| Control | Range | Default | What it does |
+| --- | --- | --- | --- |
+| Wind and thunder | On or off | On | Turns all sound on or off. `S` does the same. Turning it off fades the sound out and then pauses audio processing completely |
+| Volume | 0% to 100% | 60% | Overall level of all sound |
+| Wind | 0% to 100% | 50% | Level of the wind. It rushes and eases in slow gusts that never repeat exactly |
+| Whistle in the gusts | 0% to 100% | 40% | How strongly the wind whistles. The whistle rises in the stronger gusts, drifting in pitch, and fades in the lulls |
+| Thunder | 0% to 100% | 70% | Level of the thunder |
+| Thunder delay | None to ×2 | ×1 | Scales the gap between a flash and its thunder. At ×1 the gap is 0.8 seconds plus about 1.2 seconds for every 100 units of distance, so typically 2 to 5 seconds |
+
+Sound pauses while the page is hidden, for example in a background tab, and resumes when it is shown again.
+
 ### Performance
 
 | Item | Range | Default | What it does |
@@ -166,7 +183,7 @@ Changing any control switches the panel's label to "Custom grade". **Reset** ret
 
 ### Saved settings
 
-All settings are saved per browser in `localStorage`, under four keys:
+All settings are saved per browser in `localStorage`, under five keys:
 
 | Key | Holds |
 | --- | --- |
@@ -174,6 +191,7 @@ All settings are saved per browser in `localStorage`, under four keys:
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:sky:v1` | Twinkle, star reach, shooting star rate and town light brightness |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
+| `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
 
 To return everything to the defaults, clear the site's storage in the browser, or run `localStorage.clear()` in its developer console and reload.
 
@@ -208,6 +226,10 @@ To return everything to the defaults, clear the site's storage in the browser, o
 - **In-cloud flashes** make up the rest. They fire between charge regions near the tower's surface as a train of pulses that wander along the channel. On towers with an anvil, some run as "crawlers" just under the anvil base.
 
 Each flash lights the cloud from inside along its channel. Light from a buried channel scatters many times before it escapes, so it fades far more gently than direct moonlight and spreads through the whole tower. A ground strike also lights the land, water and rainy air around its strike point. The visible bolt is drawn at full resolution as a jagged, branching channel, and cloud in front of it hides or veils it.
+
+**Sound.** The wind is pink noise, which has equal energy in every octave, like a steady rush of air. A low-pass filter whose cutoff rises and falls with the gusts shapes it. Two narrow band-pass filters on the same noise give the whistle. Their pitch drifts with the gusts, and they only sound when the wind is strong. The gusts come from three slow swells whose periods never line up, so the pattern never repeats.
+
+Each lightning flash schedules its own thunder. It is brown noise, which is heavy in low frequencies, through two low-pass filters. It opens with a soft swell, a little quicker for ground strikes, then rolls on in two to five weaker waves over 4 to 9 seconds. Distance delays the thunder, makes it quieter and takes away more of its higher rumble, and a flash deep inside a tower sounds the most muffled. The thunder is panned left or right towards the flash. A gentle limiter on the output keeps overlapping thunder from getting harsh.
 
 **Light shafts.** A screen-space radial pass streaks moonlight past whatever is in front of the moon, so beams fan out when a tower crosses it.
 
@@ -304,7 +326,7 @@ The configuration file accepts these fields:
 | `out` | Output file, relative to the configuration file |
 | `frames` | Optional folder, relative to the configuration file, to save numbered PNG frames in instead of making a video, for example to build a GIF |
 
-Automatic lightning and shooting stars are disabled while recording, so only the scripted events happen. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
+Automatic lightning and shooting stars are disabled while recording, so only the scripted events happen. Recordings are silent. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
 
 ## Optimisations still to make
 
@@ -324,6 +346,7 @@ Automatic lightning and shooting stars are disabled while recording, so only the
 - **Slower GPUs** run at a reduced cloud resolution, so the clouds look softer.
 - **Distant anvils** can occasionally read as mushroom caps. Stretching them further downwind and thinning their edges would help.
 - **Clouds in the shadow** of a large cumulonimbus can look flat. Skylight relief was strengthened, but there is room for more.
+- **Sound needs a click or key press** before it can start, because browsers block sound on pages the viewer has not interacted with. A wallpaper app that never passes input to the page may never start the sound.
 
 ## Development history
 
@@ -354,6 +377,7 @@ The scene was built iteratively from a short brief and reference photos of moonl
 23. **Shooting stars.** Occasional meteors in the part of the sky in view, with a rate control.
 24. **Lightning minimum gap.** A control for the shortest time between flashes.
 25. **Video recorder.** An offline, deterministic recorder for making videos of the scene.
+26. **Sound.** Synthesised wind with a whistle in the gusts, and delayed thunder after each lightning flash, with controls.
 
 ## Files
 
