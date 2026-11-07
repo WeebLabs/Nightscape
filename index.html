@@ -708,6 +708,114 @@ void main(){
 }
 `;
 
+// Town lights, baked once: R the warm light the lamps throw on the ground around them,
+// G the lamps themselves as small soft points. Towns sit on dry, gentle ground (valley
+// floors and lake shores), about one candidate site in three of a 7 x 7 grid per tile;
+// lamps lie on a fine grid (580 per tile, about every half unit), dense along each
+// town's rotated street grid, thinning toward a ragged edge, with a few lone lights
+// scattered across the valleys.
+const TER_T_FRAG = `
+precision highp float;
+precision highp sampler3D;
+uniform sampler3D uNoise;
+uniform sampler2D uTerH;
+varying vec2 vUv;
+${COMMON}
+${WORLD}
+${TERRAIN_COMMON}
+const float TOWN_N = 7.0, LAMP_N = 580.0;
+const float LC = TILE / LAMP_N;
+vec2 wrapd(vec2 v){ return mod(v + 0.5 * TILE, TILE) - 0.5 * TILE; }
+float gH(vec2 xz){ return textureLod(uTerH, xz / TILE, 0.0).b * TER_RANGE + TER_LO; }
+// a town in grid cell 'cell': centre, radius and street angle (radius 0: no town)
+vec4 townAt(vec2 cell){
+  vec4 h = hash42(mod(cell, TOWN_N) * 1.31 + 7.7);
+  if (h.x > 0.36) return vec4(0.0);
+  return vec4((cell + 0.2 + 0.6 * h.yz) * (TILE / TOWN_N), 2.5 + 5.5 * h.w * h.w, h.x * 23.0);
+}
+void main(){
+  vec2 xz = gl_FragCoord.xy / ${TER_N}.0 * TILE;
+  vec2 tc = floor(xz / (TILE / TOWN_N));
+  vec4 T[9];
+  for (int k = 0; k < 9; k++) T[k] = townAt(tc + vec2(float(k % 3) - 1.0, float(k / 3) - 1.0));
+  float irr = 0.0, dots = 0.0;
+  vec2 lc0 = floor(xz / LC);
+  for (int j = -3; j <= 3; j++) for (int i = -3; i <= 3; i++){
+    vec2 lc = lc0 + vec2(float(i), float(j));
+    vec3 lh = hash33(vec3(mod(lc, LAMP_N), 3.7));
+    vec2 lp = (lc + 0.15 + 0.7 * lh.xy) * LC;
+    // how likely a lamp is here: the towns' streets and houses, or a lone farmhouse
+    float dens = 0.0015;
+    for (int k = 0; k < 9; k++){
+      if (T[k].z <= 0.0) continue;
+      vec2 d = wrapd(lp - T[k].xy);
+      float r = length(d);
+      if (r > T[k].z) continue;
+      float ca = cos(T[k].w), sa = sin(T[k].w);
+      vec2 g = abs(fract(vec2(ca * d.x + sa * d.y, -sa * d.x + ca * d.y) / 1.1) - 0.5);
+      float street = min(g.x, g.y) < 0.12 ? 0.95 : 0.3;
+      float edge = smoothstep(T[k].z, T[k].z * 0.3, r * (0.85 + 0.3 * lh.z));
+      dens = max(dens, edge * street);
+    }
+    if (lh.z > dens) continue;
+    // only on dry, gentle ground
+    float hg = gH(lp);
+    if (hg - WATER_Y < 0.25) continue;
+    float sl = length(vec2(gH(lp + vec2(0.3, 0.0)) - hg, gH(lp + vec2(0.0, 0.3)) - hg)) / 0.3;
+    if (sl > 0.45) continue;
+    float P = 0.6 + 0.8 * fract(lh.z * 13.7 + lh.x * 7.1);
+    vec2 dv = wrapd(xz - lp);
+    float d2 = dot(dv, dv);
+    irr += P * 0.03 / (0.03 + d2) * exp(-sqrt(d2) * 0.9);   // its pool of light on the ground
+    dots += P * exp(-d2 / 0.026);                              // the lamp itself, about a texel across
+  }
+  // Roads: each town links to any town in the cells ahead of it and diagonally beside it
+  // (so each pair once), within 80 units. A road bows gently and wanders; its lamps,
+  // about every 0.9 units with a few missing, stop over water and on steep ground, so a
+  // road breaks where it crosses a lake or climbs a ridge.
+  for (int b = 0; b < 25; b++){
+    vec2 cb = tc + vec2(float(b % 5) - 2.0, float(b / 5) - 2.0);
+    vec4 TA = townAt(cb);
+    if (TA.z <= 0.0) continue;
+    for (int e = 0; e < 4; e++){
+      vec2 off = e == 0 ? vec2(1.0, -1.0) : e == 1 ? vec2(1.0, 0.0) : e == 2 ? vec2(1.0, 1.0) : vec2(0.0, 1.0);
+      vec4 TB = townAt(cb + off);
+      if (TB.z <= 0.0) continue;
+      vec2 ab = TB.xy - TA.xy;
+      float L = length(ab);
+      if (L > 80.0) continue;
+      vec2 dir = ab / L, nrm = vec2(-dir.y, dir.x);
+      vec2 pa = wrapd(xz - TA.xy);
+      float sp = dot(pa, dir);
+      if (sp < -2.0 || sp > L + 2.0) continue;
+      float h = hash12(mod(cb, TOWN_N) * 3.1 + float(e) * 1.7 + 0.3);
+      float bow = (h - 0.5) * 0.3 * L;
+      float c0 = bow * sin(3.14159 * clamp(sp / L, 0.0, 1.0)) + 1.2 * sin(sp * 0.21 + h * 20.0);
+      if (abs(dot(pa, nrm) - c0) > 2.6) continue;               // too far from this road
+      const float SP = 0.9;
+      float i0 = floor((sp - 1.8) / SP);
+      for (int q = 0; q < 6; q++){
+        float ls = (i0 + float(q)) * SP;
+        if (ls < TA.z * 0.8 || ls > L - TB.z * 0.8) continue;   // inside a town the town's own lamps take over
+        float hl = hash12(vec2(i0 + float(q), h * 91.0));
+        if (hl < 0.18) continue;
+        vec2 lp = TA.xy + dir * ls + nrm * (bow * sin(3.14159 * ls / L) + 1.2 * sin(ls * 0.21 + h * 20.0));
+        float hg = gH(lp);
+        if (hg - WATER_Y < 0.25) continue;
+        float sl = length(vec2(gH(lp + vec2(0.3, 0.0)) - hg, gH(lp + vec2(0.0, 0.3)) - hg)) / 0.3;
+        if (sl > 0.6) continue;
+        float P = 0.45 + 0.35 * hl;
+        vec2 dv = wrapd(xz - lp);
+        float d2 = dot(dv, dv);
+        irr += P * 0.03 / (0.03 + d2) * exp(-sqrt(d2) * 0.9);
+        dots += P * exp(-d2 / 0.026);
+      }
+    }
+  }
+  gl_FragColor = vec4(irr, dots, 0.0, 1.0);
+}
+`;
+
 const CLOUD_FRAG = `
 precision highp float;
 precision highp sampler3D;
@@ -908,7 +1016,8 @@ uniform sampler3D uNoise;
 uniform sampler2D tCloud;
 uniform vec3 uCamPos, uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime;
-uniform sampler2D uTerH, uTerA, uTerB, uTerC;
+uniform sampler2D uTerH, uTerA, uTerB, uTerC, uTerL;
+uniform float uLamps;   // panel: how bright the town lights are
 uniform float uTerTop, uPixAngC, uNoClouds;
 varying vec2 vUv;
 ${COMMON}
@@ -960,6 +1069,7 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
   float lit = mix(0.12, 1.0, open);
   const vec3 MOON_G = vec3(1.10, 1.22, 1.42);       // moonlight on the ground
   const vec3 SKY_G = vec3(0.0050, 0.0068, 0.0120);   // what the night sky adds
+  const vec3 LAMP_C = vec3(1.00, 0.44, 0.13);         // warm sodium-orange street lights
   vec3 alb = textureLod(uTerB, uv, lod).rgb;
   alb *= alb;
   vec3 col;
@@ -968,6 +1078,9 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
     float fine = texture(uNoise, vec3(po.xz * 0.8, 0.37)).g;
     alb *= mix(1.0, 0.5 + fine, smoothstep(420.0, 140.0, t) * mix(0.3, 1.0, A.b));
     col = alb * (MOON_G * A.r * lit + SKY_G * A.g);
+    // the towns' warm street lights and the pools of light they throw (baked)
+    vec2 L = textureLod(uTerL, uv, lod).rg;
+    col += LAMP_C * uLamps * (alb * L.x * 1.3 + L.y * 0.6);
   } else {
     // A lake. From this high up the ripples are far smaller than a pixel, so the water
     // is shaded as a smooth mirror that is slightly rough: the moon's reflection spreads
@@ -996,6 +1109,8 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
     vec3 below = vec3(0.0010, 0.0017, 0.0026)
                + alb * (MOON_G * A.r * lit * 0.5 + SKY_G) * 0.4 * exp(-max(depth, 0.0) * 1.6);   // the bed shows in the shallows
     col = below * (1.0 - fres) + refl * fres + MOON_WARM * 0.0035 * D * fh / cv * moonSeen;
+    // a lake beside a lit town catches its warm glow (the lamps' light, blurred out)
+    col += LAMP_C * uLamps * textureLod(uTerL, uv, lod + 3.0).x * 0.10 * (0.35 + fres);
   }
   // the dim air between deck and ground
   float haze = 1.0 - exp(-(t - (Y_MIN - ro.y) / rd.y) * 0.0028);
@@ -1432,13 +1547,14 @@ function makeTerRT(type) {
 }
 const terH = makeTerRT(canFloat ? THREE.HalfFloatType : THREE.UnsignedByteType);
 const terA = makeTerRT(THREE.UnsignedByteType), terB = makeTerRT(THREE.UnsignedByteType), terC = makeTerRT(THREE.UnsignedByteType);
+const terL = makeTerRT(canFloat ? THREE.HalfFloatType : THREE.UnsignedByteType);   // town lights
 const NOCLOUDS = /[?&]noclouds\b/.test(location.search) ? 1 : 0;   // debug: show the ground alone
 const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Object.assign({
   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uNoClouds: { value: NOCLOUDS }
 }, camU, lightU));
 const groundPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + GROUND_FRAG, Object.assign({
   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, tCloud: { value: null },
-  uTerH: { value: terH.texture }, uTerA: { value: terA.texture }, uTerB: { value: terB.texture }, uTerC: { value: terC.texture },
+  uTerH: { value: terH.texture }, uTerA: { value: terA.texture }, uTerB: { value: terB.texture }, uTerC: { value: terC.texture }, uTerL: { value: terL.texture }, uLamps: { value: 1 },
   uTerTop: { value: -50 }, uPixAngC: { value: 0.001 }, uNoClouds: { value: NOCLOUDS }
 }, camU, lightU));
 const taaPass = makePass(TAA_FRAG, {
@@ -1600,12 +1716,14 @@ function bakeStep() {
 // Terrain bake: the height in 4 strips, then moonlight, colour and horizons in strips
 // (the lighting pass is the heavy one), then a CPU copy of the heights for lightning.
 const terHPass = makePass(TER_H_FRAG, { uNoise: { value: noiseTex } });
+const terTPass = makePass(TER_T_FRAG, { uNoise: { value: noiseTex }, uTerH: { value: terH.texture } });
 const terLPass = makePass(TER_L_FRAG, { uNoise: { value: noiseTex }, uTerH: { value: terH.texture }, uMoonDir: { value: MOON_DIR }, uMode: { value: 0 } });
 const TER_JOBS = [];
 for (let s = 0; s < 4; s++) TER_JOBS.push({ rt: terH, pass: terHPass, s, n: 4 });
 for (let s = 0; s < 8; s++) TER_JOBS.push({ rt: terA, pass: terLPass, mode: 0, s, n: 8 });
 for (let s = 0; s < 2; s++) TER_JOBS.push({ rt: terB, pass: terLPass, mode: 1, s, n: 2 });
 for (let s = 0; s < 4; s++) TER_JOBS.push({ rt: terC, pass: terLPass, mode: 2, s, n: 4 });
+for (let s = 0; s < 8; s++) TER_JOBS.push({ rt: terL, pass: terTPass, s, n: 8 });
 let terJob = 0, terHeights = null;
 function terrainStep() {
   if (terJob < TER_JOBS.length) {
@@ -2246,6 +2364,11 @@ function buildPanel() {
       <div class="ctl"><input type="range" id="s-low" min="0" max="0.35" step="0.005"></div>
       <div class="ends"><span>Horizon</span><span>Higher</span></div>
     </div>`;
+  html += `<div class="sec">Ground</div>
+    <div class="row"><label for="s-lamps">Town lights</label><output id="s-lamps-v"></output>
+      <div class="ctl"><input type="range" id="s-lamps" min="0" max="3" step="0.05"></div>
+      <div class="ends"><span>Off</span><span>Bright</span></div>
+    </div>`;
   html += `<div class="sec">Performance</div>
     <div class="stats" aria-live="off">
       <span>Clouds</span><b id="q-cloud">–</b>
@@ -2275,7 +2398,7 @@ gradeBody.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.id === 'w-on' || t.id === 'w-rate') { onStormInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps') { onSkyInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
@@ -2389,23 +2512,29 @@ function flashNow() {
 syncStorm();
 
 /* ---------------------------------------------------------------------------
-   Sky: how much the stars twinkle and how close to the horizon they reach,
-   saved per viewer
+   Sky and ground: how much the stars twinkle, how close to the horizon they reach,
+   and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1, low: 0.035 };
-try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = k; } catch (e) {}
+let sky = { twinkle: 1, low: 0.035, lamps: 1 };
+try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
+const sLamps = document.getElementById('s-lamps'), sLampsV = document.getElementById('s-lamps-v');
 function syncSky() {
   sTw.value = sky.twinkle; sLow.value = sky.low;
   sTwV.textContent = sky.twinkle === 0 ? 'off' : '×' + (+sky.twinkle).toFixed(2);
   sLowV.textContent = (Math.asin(Math.min(sky.low, 1)) * 180 / Math.PI).toFixed(1) + '° up';
   compPass.u.uTwinkle.value = sky.twinkle;
   compPass.u.uStarLow.value = sky.low;
+  sLamps.value = sky.lamps;
+  sLampsV.textContent = sky.lamps === 0 ? 'off' : '×' + (+sky.lamps).toFixed(2);
+  groundPass.u.uLamps.value = sky.lamps;
 }
 function onSkyInput(t) {
-  if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value); else sky.low = parseFloat(t.value);
+  if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value);
+  else if (t.id === 's-lamps') sky.lamps = parseFloat(t.value);
+  else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
   syncSky();
 }
