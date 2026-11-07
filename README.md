@@ -2,6 +2,8 @@
 
 A live, endless flight just above a moonlit sea of clouds, rendered in real time in the browser with WebGL 2 and Three.js.
 
+**[Open the live demo](https://weeblabs.github.io/Nightscape/)**
+
 ![A flight over a sea of clouds at night as the full moon comes out from behind a tall cloud](media/flight.gif)
 
 *The flight in this clip runs at 2.6 times its normal speed, without film grain.*
@@ -65,7 +67,9 @@ A large share of the work has gone into stability. Clouds must not shimmer, boil
 
 ### Running it
 
-Open `index.html` directly in a browser, or serve the folder with any static file server, for example:
+The quickest way is the live demo at [weeblabs.github.io/Nightscape](https://weeblabs.github.io/Nightscape/), which GitHub Pages serves from the `main` branch.
+
+To run it locally, open `index.html` directly in a browser, or serve the folder with any static file server, for example:
 
 ```bash
 python3 -m http.server 8765
@@ -75,7 +79,7 @@ Then open `http://localhost:8765`. The page bakes its lighting and terrain for a
 
 ### Using it as a wallpaper
 
-Any tool that can show a web page full screen or as a desktop background can run the scene. Options include a browser window in full-screen or kiosk mode, and live-wallpaper apps that accept a URL or a local HTML file, such as Plash on macOS or Lively Wallpaper and Wallpaper Engine on Windows. These apps have not been tested with this project, so check that the one you choose provides WebGL 2.
+Any tool that can show a web page full screen or as a desktop background can run the scene. Options include a browser window in full-screen or kiosk mode, and live-wallpaper apps that accept a URL (such as the live demo address) or a local HTML file, such as Plash on macOS or Lively Wallpaper and Wallpaper Engine on Windows. These apps have not been tested with this project, so check that the one you choose provides WebGL 2.
 
 Settings you choose in the panel are saved in that browser's local storage. A wallpaper app usually keeps its own storage, so set up the scene inside the app if it lets you interact with the page.
 
