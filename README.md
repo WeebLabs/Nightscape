@@ -1,8 +1,10 @@
-# Moonlit Cloud Sea
+# Nightscape
 
 A live, endless flight just above a moonlit sea of clouds, rendered in real time in the browser with WebGL 2 and Three.js.
 
-![A full moon over a sea of clouds at night, with lightning striking from a storm tower on the right](media/screenshot.jpg)
+![A flight over a sea of clouds at night as the full moon comes out from behind a tall cloud](media/flight.gif)
+
+*The flight in this clip runs at 2.6 times its normal speed, without film grain.*
 
 ## Contents
 
@@ -38,7 +40,7 @@ A live, endless flight just above a moonlit sea of clouds, rendered in real time
 
 ## What it is
 
-Moonlit Cloud Sea is a single web page that renders a night flight over the top of a cloud layer. The camera drifts slowly forward along the cloud tops, passing cumulus heaps and tall cumulonimbus storm towers. A full moon hangs low ahead, lighting silver edges on the clouds and casting light shafts between them. Through breaks in the cloud you can see flooded mountains far below, with forests, lakes, small towns and radio masts with blinking warning lights. Now and then a storm tower flashes with lightning or a shooting star crosses the sky.
+Nightscape is a single web page that renders a night flight over the top of a cloud layer. The camera drifts slowly forward along the cloud tops, passing cumulus heaps and tall cumulonimbus storm towers. A full moon hangs low ahead, lighting silver edges on the clouds and casting light shafts between them. Through breaks in the cloud you can see flooded mountains far below, with forests, lakes, small towns and radio masts with blinking warning lights. Now and then a storm tower flashes with lightning or a shooting star crosses the sky.
 
 Everything is in one self-contained file, `index.html`. The only external request is Three.js r128 from cdnjs. Nothing is pre-rendered: the clouds are ray-marched every frame, and the lighting, terrain and town lights are generated and baked on the GPU when the page opens.
 
@@ -289,12 +291,14 @@ The configuration file accepts these fields:
 | `fps` | Output frame rate |
 | `sub` | Simulated frames per output frame. 2 at 30 fps simulates at 60 Hz, so temporal accumulation behaves as it does live |
 | `t0` | Where in the flight to start, in seconds |
+| `speed` | How fast the camera moves, as a multiple of its normal pace. Twinkle, lights and lightning still run in real time |
 | `seconds` | Video length |
 | `crf`, `preset` | x264 quality and speed settings |
 | `seed` | Random seed |
 | `storage` | Optional saved settings to load, keyed by the `localStorage` keys listed in [Saved settings](#saved-settings) |
 | `events` | Scripts to run at given times. `__pick(kind, test)` re-rolls a flash of kind `deep`, `cg` (ground strike) or `ic` (in-cloud) until `test` accepts it, and `window.__cloudScene.meteor(fireball)` sends a shooting star |
 | `out` | Output file, relative to the configuration file |
+| `frames` | Optional folder, relative to the configuration file, to save numbered PNG frames in instead of making a video, for example to build a GIF |
 
 Automatic lightning and shooting stars are disabled while recording, so only the scripted events happen. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
 
@@ -353,7 +357,7 @@ The scene was built iteratively from a short brief and reference photos of moonl
 | --- | --- |
 | `index.html` | The complete scene. Three.js r128 loads from cdnjs, and everything else is inline |
 | `assets/moon-lroc-512.jpg` | The lunar albedo map embedded in `index.html`, kept for reference |
-| `media/screenshot.jpg` | The screenshot at the top of this file |
+| `media/flight.gif` | The clip at the top of this file |
 | `tools/record.mjs` | The offline video recorder |
 | `tools/example-video.json` | An example recorder configuration for a 60-second 1080p video |
 | `experiments/tall-peaks.patch` | An unmerged experiment that adds two tall massifs per tile rising through the cloud deck |

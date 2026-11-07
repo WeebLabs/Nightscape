@@ -75,17 +75,22 @@ console.log('scene ready', JSON.stringify(info));
 
 // draw a frame and read the canvas back in the same task, before the browser presents
 // (and clears) the drawing buffer
+// the flight position is tracked here so the camera can move at cfg.speed times its normal
+// pace while everything else (twinkle, lights, lightning, accumulation) runs in real time
+const SPEED = cfg.speed || 1;
+let sim = 0;
+const step = (dt) => { sim += dt * SPEED; return `window.__cloudScene.setTime(${sim - dt}), window.__cloudScene.advance(${dt})`; };
 const frameAndGrab = async (dt) => {
-  const url = await evalJS(`(window.__cloudScene.advance(${dt}), document.querySelector('canvas').toDataURL('image/png'))`);
+  const url = await evalJS(`(${step(dt)}, document.querySelector('canvas').toDataURL('image/png'))`);
   return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
 };
 const FPS = cfg.fps || 60, DT = 1 / FPS;
-const advance = (dt) => evalJS(`window.__cloudScene.advance(${dt})`);
+const advance = (dt) => evalJS(`(${step(dt)}, 0)`);
 
 if (cfg.mode === 'stills') {
   // one still per start time, after a short warm-up so the accumulation settles
   for (const t of cfg.times) {
-    await evalJS(`window.__cloudScene.setTime(${t - 1})`);
+    sim = t - SPEED;
     for (let k = 0; k < FPS - 1; k++) await advance(DT);
     fs.writeFileSync(`${OUT}/still_${String(t).padStart(4, '0')}.png`, await frameAndGrab(DT));
     console.log('still', t);
@@ -95,10 +100,13 @@ if (cfg.mode === 'stills') {
   // __pick(kind, ok) re-rolls a flash until ok(result) holds (or gives up after 20 tries).
   await evalJS(`window.__pick = (kind, ok) => { let r; for (let i = 0; i < 20; i++) { r = window.__cloudScene.strike(kind); if (r && ok(r)) break; } return r; }`);
   const SUB = cfg.sub || 1, SDT = DT / SUB;
-  await evalJS(`window.__cloudScene.setTime(${(cfg.t0 || 30) - 2})`);
+  sim = (cfg.t0 || 30) - 2 * SPEED;
   for (let k = 0; k < 2 * FPS * SUB; k++) await advance(SDT);
   const N = Math.round(cfg.seconds * FPS);
-  const ff = spawn('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'png', '-i', '-',
+  // with cfg.frames set, numbered PNGs go into that folder instead of a video
+  const FR = cfg.frames ? path.resolve(OUT, cfg.frames) : null;
+  if (FR) fs.mkdirSync(FR, { recursive: true });
+  const ff = FR ? null : spawn('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'png', '-i', '-',
     '-c:v', 'libx264', '-preset', cfg.preset || 'slow', '-crf', String(cfg.crf || 16), '-tune', 'grain', '-pix_fmt', 'yuv420p', '-profile:v', 'high',
     '-movflags', '+faststart', '-r', String(FPS), path.resolve(OUT, cfg.out)], { stdio: ['pipe', 'inherit', 'inherit'] });
   const events = (cfg.events || []).slice().sort((a, b) => a.at - b.at);
@@ -110,13 +118,13 @@ if (cfg.mode === 'stills') {
       if (j < SUB - 1) await advance(SDT);
     }
     const png = await frameAndGrab(SDT);
-    if (!ff.stdin.write(png)) await new Promise(r => ff.stdin.once('drain', r));
+    if (FR) fs.writeFileSync(`${FR}/frame_${String(k).padStart(5, '0')}.png`, png);
+    else if (!ff.stdin.write(png)) await new Promise(r => ff.stdin.once('drain', r));
     if (cfg.snap && cfg.snap.includes(k)) fs.writeFileSync(`${OUT}/frame_${k}.png`, png);
     if (k % FPS === 0) console.log(`frame ${k}/${N}  ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   }
-  ff.stdin.end();
-  await new Promise(r => ff.on('close', r));
-  console.log('wrote', path.resolve(OUT, cfg.out));
+  if (ff) { ff.stdin.end(); await new Promise(r => ff.on('close', r)); }
+  console.log('wrote', FR || path.resolve(OUT, cfg.out));
 }
 ws.close(); chrome.kill(); server.close();
 process.exit(0);
