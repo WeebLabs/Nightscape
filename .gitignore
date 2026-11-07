@@ -1,2 +1,4 @@
 .DS_Store
 *.log
+tools/profile/
+*.mp4

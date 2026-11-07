@@ -1,0 +1,533 @@
+diff --git a/README.md b/README.md
+index b5085cb..72d5b20 100644
+--- a/README.md
++++ b/README.md
+@@ -34,6 +34,13 @@ The terrain never changes and the moon never moves, so nearly all of it is baked
+ 
+ Each frame then only finds where a ray meets the ground (a height-field march through the baked height) and adds the live parts: the deck's shadow, the moon's glitter, and fine crown and rock texture up close. From this high up, ripples on the lakes are far smaller than a pixel, so the water is shaded as a smooth mirror with a little roughness instead of with per-pixel waves. Lightning ground strikes land on the terrain's real surface, read from a CPU copy of the baked heights. Open the page with `?noclouds` to see the ground on its own.
+ 
++**Tall peaks** (Landscape in the panel: *Tall peaks* or *Rolling ranges*). Two massifs per tile rise about 100 units above the lakes, nearly 10 km if a unit is ~100 m, so their summits poke 6–10 units through the top of the deck. They stand 40 and 45 units off the flight path. Their profile is concave, like a real high massif: a summit pyramid with faces of about 40–45°, upper flanks of about 35°, and foothills easing to ~10°. Three arêtes run down from each summit, with ridged couloirs and buttresses that sharpen toward the top. Snow lies high up on slopes gentle enough to hold it, below about 40–50°, so the steepest faces stay bare rock.
++- **The cloud pass:** a ray stops where it meets a peak's rock. It tests a vertical cylinder around each summit and marches the baked height only inside one, which keeps the extra cost negligible.
++- **The ground pass:** it shades the rock in clear high-altitude air, using baked moonlight, the cloud's shadow from the bake, and open sky.
++- **Peaks and the cloud bake:** the peaks cast moon shadows across the cloud tops, and the clouds make room for them. There's no cloud inside the rock, and no heap piled on a summit, which would read as a plume.
++- **Placement:** the massifs sit where no storm tower lines up behind them from the flight path.
++- **Switching:** changing the Landscape setting rebakes the terrain and the cloud lighting in a moment. The choice is saved in the browser.
++
+ **Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map (public domain), embedded in the page. You see the real near side, north up, with the maria and Tycho in their correct places. A layered halo surrounds it. The sky is a deep gradient with a warm glow along the horizon under the moon, and procedural twinkling stars that fade near the moon's glare and the horizon.
+ 
+ **Lightning.** Every several seconds one of the cumulonimbus near the camera flashes. About two in three flashes are buried deep in the cloud, one in five is a ground strike, and the rest are in-cloud flashes near the surface.
+@@ -154,6 +161,7 @@ The scene was built iteratively from a brief and four reference photos of moonli
+     Measured at 61% cloud resolution over 4 positions and 48 frames each, cloud jumps larger than 32 brightness levels fell from 327 to 4, and jumps larger than 64 levels from 112 to none. The frame costs about 15% more GPU time. Most of that is the march now sampling planes it used to skip by mistake. Sub-pixel jitter was also tried and made no visible difference, so it was left out.
+ 17. **Near-cloud fog.** Fog took its colour from the sky in each pixel's direction, so close clouds crossing the horizon on screen wore a band of horizon glow. Close-range fog is now a plain night blue that blends into the sky's colour between 100 and 250 units.
+ 18. **Flooded mountains.** The ocean's waves read as a curly texture rather than water, so the ground became flooded mountains with forests and lakes, baked into tiling textures (height with canopy, moonlight and shadows, sky visibility, colour, horizons). It is drawn in its own pass, and costs slightly less than the old ocean did: about 49 ms against 54 ms per frame in a GPU-timed comparison at 61% cloud resolution in a hidden browser pane, where absolute times run high. The terrain bake runs after the cloud bake at startup, in strips across several frames.
++19. **Tall peaks.** An optional pair of massifs per tile whose summits poke through the deck, with realistic slopes, snow and arêtes. They block the clouds behind them, cast moon shadows on the deck, and clear the clouds from their own rock. Switchable in the panel. Timed at 61% cloud resolution, frames cost the same with or without them (within noise), once the ground pass reused the cloud pass's rock hits instead of searching again.
+ 
+ ## Known limitations and ideas
+ 
+diff --git a/index.html b/index.html
+index f522d8b..fef05ad 100644
+--- a/index.html
++++ b/index.html
+@@ -512,6 +512,76 @@ vec3 lightningAt(vec3 p){
+ }
+ `;
+ 
++const TER_N = 1024;
++const TERRAIN_COMMON = `
++const float TER_LO = -100.0, TER_RANGE = 140.0;   // heights stored as (y - TER_LO) / TER_RANGE
++const float TER_TEXEL = ${320 / TER_N};
++const float WATER_Y = -85.0;
++`;
++// Optional tall peaks: two massifs per tile, 40 and 45 units off the flight path, whose
++// summits (about 100 units above the lakes, ~10 km if a unit is ~100 m) poke a little
++// way through the top of the deck. Only the part within PEAK_RB of a summit rises
++// above the deck's base, which keeps the work of finding the rock cheap.
++const PEAKS = `
++uniform float uPeaks;
++const vec2 PEAK_A = vec2(40.0, 200.0), PEAK_B = vec2(275.0, 300.0);   // clear of the storm towers' lines of sight
++const float PEAK_R = 170.0, PEAK_RB = 30.0, PEAK_TOP = 38.0;
++vec2 peakOff(vec2 xz, vec2 c){ return mod(xz - c + 0.5 * TILE, TILE) - 0.5 * TILE; }
++bool nearPeak(vec2 xz){ return min(length(peakOff(xz, PEAK_A)), length(peakOff(xz, PEAK_B))) < PEAK_RB; }
++`;
++// Finding the rock of a tall peak above the deck's base: a ray is tested against a
++// vertical cylinder around each summit (in the 3 x 3 tiles about the camera), and only
++// inside one does it march the baked height.
++const ROCK = `
++float terLod(float t){ return clamp(log2(max(t * uPixAngC, 1e-4) / TER_TEXEL), 0.0, 6.0); }
++float terY(vec2 xz, float lod){ return textureLod(uTerH, xz / TILE, lod).r * TER_RANGE + TER_LO; }
++float peakRockT(vec3 ro, vec3 rd, float tEnd){
++  if (uPeaks < 0.5) return 1e9;
++  float best = 1e9;
++  vec2 base = floor(ro.xz / TILE) * TILE;
++  float a = dot(rd.xz, rd.xz);
++  if (a < 1e-8) return best;
++  // the slab of height where a summit can be above the deck's base
++  float tLo = 0.0, tHi = tEnd;
++  if (abs(rd.y) > 1e-5){
++    float t1 = (Y_MIN - ro.y) / rd.y, t2 = (uTerTop - ro.y) / rd.y;
++    tLo = max(tLo, min(t1, t2)); tHi = min(tHi, max(t1, t2));
++  } else if (ro.y > uTerTop || ro.y < Y_MIN) return best;
++  float kS = 1.0 / (abs(rd.y) + 1.4 * sqrt(a));
++  for (int k = 0; k < 2; k++){
++    vec2 P = k == 0 ? PEAK_A : PEAK_B;
++    for (int j = 0; j < 9; j++){
++      vec2 c = base + P + vec2(float(j % 3) - 1.0, float(j / 3) - 1.0) * TILE;
++      vec2 oc = ro.xz - c;
++      float b = dot(oc, rd.xz), cc = dot(oc, oc) - PEAK_RB * PEAK_RB, disc = b * b - a * cc;
++      if (disc <= 0.0) continue;
++      float sq = sqrt(disc);
++      float t0 = max((-b - sq) / a, tLo), t1 = min((-b + sq) / a, min(tHi, best));
++      if (t0 >= t1) continue;
++      float t = t0, tp = t0;
++      for (int i = 0; i < 48; i++){
++        if (t > t1) break;
++        vec3 q = ro + rd * t;
++        float dy = q.y - terY(q.xz, terLod(t));
++        if (dy < 0.0){
++          float lo = tp, hi = t;
++          for (int m = 0; m < 6; m++){
++            float mid = 0.5 * (lo + hi);
++            vec3 qm = ro + rd * mid;
++            if (qm.y < terY(qm.xz, terLod(mid))) hi = mid; else lo = mid;
++          }
++          best = min(best, 0.5 * (lo + hi));
++          break;
++        }
++        tp = t;
++        t += max(dy * kS, 0.04 + t * 0.002);
++      }
++    }
++  }
++  return best;
++}
++`;
++
+ // Baked lighting: for every point of the tile, how much cloud lies between it
+ // and the moon (R) and between it and the open sky above (G).
+ const BAKE_N = (DBG && DBG.bakeN) || 256, BAKE_NY = 96, BAKE_COLS = 8, BAKE_ROWS = 12;
+@@ -519,10 +589,24 @@ const BAKE_FRAG = `
+ precision highp float;
+ precision highp sampler3D;
+ uniform sampler3D uNoise;
++uniform sampler2D uTerH;
+ uniform vec3 uMoonDir;
+ varying vec2 vUv;
+ ${COMMON}
+ ${WORLD}
++${TERRAIN_COMMON}
++${PEAKS}
++// With tall peaks, the clouds make room for them: none inside the rock, and no heaps
++// piled on a summit (which read as an eruption plume); the deck still wraps the slopes.
++float carve(float sd, vec3 q){
++  if (uPeaks < 0.5) return sd;
++  float d = min(length(peakOff(q.xz, PEAK_A)), length(peakOff(q.xz, PEAK_B)));
++  if (d > 55.0) return sd;
++  float rockY = d < PEAK_RB ? textureLod(uTerH, q.xz / TILE, 0.0).r * TER_RANGE + TER_LO : -1e3;
++  // heaps kept low near a summit, the limit rising quickly past ~35 units so it leaves no edge
++  float cap = 9.0 + 0.12 * d + max(d - 35.0, 0.0) * 1.6;
++  return min(sd, min(q.y - rockY - 0.4, cap - q.y));
++}
+ void main(){
+   vec2 px = gl_FragCoord.xy;
+   vec2 tile = floor(px / ${BAKE_N}.0);
+@@ -530,21 +614,24 @@ void main(){
+   if (k >= ${BAKE_NY}.0){ gl_FragColor = vec4(0.0); return; }
+   vec2 ij = px - tile * ${BAKE_N}.0;
+   vec3 p = vec3(ij.x / ${BAKE_N}.0 * TILE, Y_MIN + (k + 0.5) / ${BAKE_NY}.0 * (Y_MAX - Y_MIN), ij.y / ${BAKE_N}.0 * TILE);
+-  float od = 0.0, ds = 0.12, tt = 0.0;
++  float od = 0.0, ds = 0.12, tt = 0.0, rock = 1.0;
+   for (int i = 0; i < 150; i++){
+     vec3 q = p + uMoonDir * (tt + ds * 0.5);
+     if (q.y > Y_MAX) break;
+-    od += densLight(sceneSD(q)) * ds * exp(-tt * 0.02);   // far shadows fill in with scattered light
++    od += densLight(carve(sceneSD(q), q)) * ds * exp(-tt * 0.02);   // far shadows fill in with scattered light
++    // a tall peak between here and the moon (A: 0 in its shadow)
++    if (uPeaks > 0.5 && rock > 0.0 && q.y < PEAK_TOP && nearPeak(q.xz)
++        && q.y < textureLod(uTerH, q.xz / TILE, 0.0).r * TER_RANGE + TER_LO) rock = 0.0;
+     tt += ds; ds = min(ds * 1.07, 3.0);
+   }
+   float up = 0.0; ds = 0.3; tt = 0.0;
+   for (int i = 0; i < 14; i++){
+     vec3 q = p + vec3(0.0, tt + ds * 0.5, 0.0);
+-    up += densLight(sceneSD(q)) * ds;
++    up += densLight(carve(sceneSD(q), q)) * ds;
+     tt += ds; ds *= 1.15;
+   }
+   // B: the cloud shape field itself, so rendering can read it instead of rebuilding it
+-  gl_FragColor = vec4(1.0 - exp(-od * 0.25), 1.0 - exp(-up * 0.4), clamp((sceneSDFull(p) + 10.0) / 16.0, 0.0, 1.0), 1.0);
++  gl_FragColor = vec4(1.0 - exp(-od * 0.25), 1.0 - exp(-up * 0.4), clamp((carve(sceneSDFull(p), p) + 10.0) / 16.0, 0.0, 1.0), rock);
+ }
+ `;
+ 
+@@ -556,12 +643,6 @@ void main(){
+      TER_B  albedo (stored as its square root)
+      TER_C  horizon heights toward +x, +z, -x, -z (tan of the angle / 2), for reflections
+ --------------------------------------------------------------------------- */
+-const TER_N = 1024;
+-const TERRAIN_COMMON = `
+-const float TER_LO = -100.0, TER_RANGE = 52.0;   // heights stored as (y - TER_LO) / TER_RANGE
+-const float TER_TEXEL = ${320 / TER_N};
+-const float WATER_Y = -85.0;
+-`;
+ const TERRAIN_GEN = `
+ // Periodic gradient noise with analytic derivatives, period 'per' cells, so every
+ // octave wraps with the world tile.
+@@ -619,12 +700,42 @@ varying vec2 vUv;
+ ${COMMON}
+ ${WORLD}
+ ${TERRAIN_COMMON}
++${PEAKS}
+ ${TERRAIN_GEN}
++// A massif's profile (0..1) at xz: concave, so a steep summit pyramid (faces of
++// 45-50 degrees) stands on broad flanks of 25-30 degrees and foothills of ~10.
++// Three arêtes run down from the summit; they reach further out than the faces.
++float massif(vec2 xz, vec2 c, float k){
++  vec2 d = peakOff(xz, c);
++  float x = length(d) / PEAK_R;
++  if (x > 1.3) return 0.0;
++  float th = atan(d.y, d.x);
++  float rid = pow(abs(cos(1.5 * th + k * 1.9 + 0.35 * sin(2.0 * th + k))), 6.0);
++  return pow(max(1.0 - x / (1.0 + 0.22 * rid), 0.0), 2.2);
++}
++float surfY(vec2 p){
++  float h = groundY(p);
++  if (uPeaks < 0.5) return h;
++  vec2 xz = p * TILE;
++  float f = max(massif(xz, PEAK_A, 0.0), massif(xz, PEAK_B, 1.0));
++  if (f <= 0.0) return h;
++  // the broad base of the massif replaces the ranges near its core
++  float core = smoothstep(0.3, 0.75, f);
++  float rough = pnoise(p + 0.17, 38.0) + 0.5 * pnoise(p + 0.41, 76.0) + 0.25 * pnoise(p, 152.0);
++  // ridged detail, strongest toward the summit: sharp arêtes, couloirs and rock buttresses
++  float rg = 0.0, amp = 1.0, per = 48.0;
++  for (int i = 0; i < 5; i++){
++    float n = 1.0 - abs(pnoise(p + 0.31 * float(i), per));
++    rg += amp * n * n; amp *= 0.5; per *= 2.0;
++  }
++  h = mix(h, WATER_Y + 6.0, core) + f * (92.0 + 3.0 * rough) + f * f * 12.0 * (rg / 1.94 - 0.5);
++  return clamp(h, TER_LO + 0.5, TER_LO + TER_RANGE - 1.0);
++}
+ void main(){
+   vec2 p = gl_FragCoord.xy / ${TER_N}.0;
+   float e = 1.0 / ${TER_N}.0;
+-  float h0 = groundY(p);
+-  float slope = length(vec2(groundY(p + vec2(e, 0.0)) - h0, groundY(p + vec2(0.0, e)) - h0)) / TER_TEXEL;
++  float h0 = surfY(p);
++  float slope = length(vec2(surfY(p + vec2(e, 0.0)) - h0, surfY(p + vec2(0.0, e)) - h0)) / TER_TEXEL;
+   float hw = h0 - WATER_Y;
+   // Forest: off the cliffs, above the shore, below a ragged tree line, in patches.
+   float patchN = pfbm(p + 0.29, 22.0);
+@@ -652,7 +763,7 @@ float tH(vec2 xz){ return textureLod(uTerH, xz / TILE, 0.0).r * TER_RANGE + TER_
+ // highest horizon (as the tangent of its angle) from height y0 looking along dir
+ float horizonTan(vec2 xz, float y0, vec2 dir){
+   float m = 0.0, s = 0.35;
+-  for (int i = 0; i < 30; i++){
++  for (int i = 0; i < 36; i++){
+     m = max(m, (tH(xz + dir * s) - y0) / s);
+     s *= 1.19;
+   }
+@@ -699,6 +810,9 @@ void main(){
+     vec3 trees = mix(vec3(0.020, 0.032, 0.020), vec3(0.040, 0.058, 0.034), crown);
+     alb = mix(alb, trees, H.g);
+     alb = mix(alb, vec3(0.060, 0.056, 0.050), smoothstep(0.7, 0.05, hw) * (1.0 - H.g));   // wet shore
++    // snow high on the massifs, except on faces too steep to hold it
++    float snow = smoothstep(38.0, 46.0, hw + (H.a - 0.5) * 12.0) * smoothstep(0.36, 0.22, 1.0 - n.y);   // holds below ~40-50 degrees
++    alb = mix(alb, vec3(0.70, 0.72, 0.76) * (0.85 + 0.3 * H.a), snow);
+     if (water) alb = mix(vec3(0.07, 0.065, 0.055), alb, 0.4);                                // lake bed
+     gl_FragColor = vec4(sqrt(alb), 1.0);
+   } else {
+@@ -715,20 +829,26 @@ uniform sampler3D uNoise;
+ uniform vec3 uCamPos, uCamR, uCamU, uCamF, uMoonDir;
+ uniform float uTanHalf, uAspect, uTime, uFrame;
+ uniform float uNoClouds;
++uniform sampler2D uTerH;
++uniform float uTerTop, uPixAngC;
+ varying vec2 vUv;
+ ${COMMON}
++${TERRAIN_COMMON}
+ 
+ const vec3 MOON_COOL = vec3(0.74, 0.84, 1.00);
+ const vec3 MOON_WARM = vec3(1.00, 0.88, 0.70);
+ const vec3 AMB_LO = vec3(0.0060, 0.0085, 0.0170);
+ const vec3 AMB_HI = vec3(0.040, 0.060, 0.118);
+ ${WORLD}
++${PEAKS}
++${ROCK}
+ ${BAKED}
+ ${LIGHTNING}
+ // optical depth toward the moon (x) and toward the sky above (y), from the bake
+ vec2 baked(vec3 p){
+   vec4 b = texture(uBake, vec3(p.x / TILE, p.z / TILE, (p.y - Y_MIN) / (Y_MAX - Y_MIN)));
+-  return vec2(-log(max(1.0 - b.r, 2e-3)) * 4.0, -log(max(1.0 - b.g, 2e-3)) * 2.5);
++  // (A: 0 where a tall peak hides the moon)
++  return vec2(-log(max(1.0 - b.r, 2e-3)) * 4.0 + (1.0 - b.a) * 6.0, -log(max(1.0 - b.g, 2e-3)) * 2.5);
+ }
+ // light reaching p: two crisp local samples, then the baked shadow beyond them.
+ // Far away only the bake is read; between 55 and 80 units the two are blended.
+@@ -782,6 +902,10 @@ void main(){
+   // (rays that leave through the base of the deck see the ocean far below)
+   if (rd.y > 0.0) tMax = min(tMax, (Y_MAX - ro.y) / rd.y);
+   else tMax = min(tMax, (Y_MIN - ro.y) / rd.y);
++  // a tall peak's rock ends the march (the ground pass shades it)
++  float tRock = peakRockT(ro, rd, tMax);
++  bool rock = tRock < tMax;
++  if (rock) tMax = tRock;
+ 
+   float cosT = dot(rd, uMoonDir);
+   float ph0 = mix(hg(cosT, -0.22), hg(cosT, 0.80), 0.70);
+@@ -882,19 +1006,21 @@ void main(){
+   // Through a break in the deck the ray goes on down to the flooded mountains, which
+   // the ground pass draws next (keeping that work out of this heavy shader): it gets
+   // the transmittance left here, and no horizon haze.
+-  bool ground = rd.y < 0.0 && t >= tMax && T > 0.003 && ((Y_MIN - ro.y) / rd.y <= 200.0 || uNoClouds > 0.5);
++  bool ground = !rock && rd.y < 0.0 && t >= tMax && T > 0.003 && ((Y_MIN - ro.y) / rd.y <= (uNoClouds > 0.5 ? 1000.0 : 200.0));
+   // The cloud sea continues past the march distance: fill the far horizon with haze.
+-  float far = ground ? 0.0 : smoothstep(-0.002, -0.03, rd.y);
++  float far = ground || rock ? 0.0 : smoothstep(-0.002, -0.03, rd.y);
+   vec3 farC = mix(fogC * vec3(0.40, 0.44, 0.52), fogC * 0.8, smoothstep(-0.05, -0.002, rd.y));
+   S += T * farC * far;
+   dSum += T * far * 250.0; wSum += T * far;
+   T *= 1.0 - far;
+ #ifdef PACK
+-  // alpha carries depth (integer part, 1/32 unit steps) and transmittance (fraction)
++  // alpha carries depth (integer part, 1/32 unit steps) and transmittance (fraction);
++  // negative (-a - 1) where the ray ended on a tall peak's rock, for the ground pass
+   float depth = wSum > 0.02 ? dSum / wSum : 250.0;
+-  gl_FragColor = vec4(S, floor(clamp(depth, 0.0, 250.0) * 32.0) + clamp(T, 0.0, 1.0) * 0.999);
++  float a = floor(clamp(depth, 0.0, 250.0) * 32.0) + clamp(T, 0.0, 1.0) * 0.999;
++  gl_FragColor = vec4(S, rock ? -a - 1.0 : a);
+ #else
+-  gl_FragColor = vec4(S, T);
++  gl_FragColor = vec4(S, rock ? -T - 1.0 : T);
+ #endif
+ }
+ `;
+@@ -916,17 +1042,19 @@ ${TERRAIN_COMMON}
+ const vec3 MOON_COOL = vec3(0.74, 0.84, 1.00);
+ const vec3 MOON_WARM = vec3(1.00, 0.88, 0.70);
+ ${WORLD}
++${PEAKS}
++${ROCK}
+ ${BAKED}
+ ${LIGHTNING}
+ // The flooded mountains below the deck. Everything that doesn't change is baked
+ // (height, canopy, moonlight and its shadows, sky visibility, colour, horizons), so a
+ // frame only finds where the ray meets the ground or a lake and adds the live parts:
+ // the deck's shadow, the moon's glitter on the lakes, and fine texture up close.
+-float terLod(float t){ return clamp(log2(max(t * uPixAngC, 1e-4) / TER_TEXEL), 0.0, 6.0); }
+-float terY(vec2 xz, float lod){ return textureLod(uTerH, xz / TILE, lod).r * TER_RANGE + TER_LO; }
+ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
+   float tW = (WATER_Y - ro.y) / rd.y;
+-  float t = max((uTerTop - ro.y) / rd.y, 0.0);
++  // (from the deck's base down: rock above it is found by peakRockT)
++  // (in the ?noclouds view, the whole terrain to the horizon)
++  float t = max(max((uTerTop - ro.y) / rd.y, uNoClouds > 0.5 ? 0.0 : (Y_MIN - ro.y) / rd.y), 0.0);
+   // a safe step from the height above the ground, for slopes up to ~1.4
+   float kS = 1.0 / (-rd.y + 1.4 * length(rd.xz));
+   bool land = false;
+@@ -995,7 +1123,8 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
+     float depth = WATER_Y - (textureLod(uTerH, uv, lod).b * TER_RANGE + TER_LO);
+     vec3 below = vec3(0.0010, 0.0017, 0.0026)
+                + alb * (MOON_G * A.r * lit * 0.5 + SKY_G) * 0.4 * exp(-max(depth, 0.0) * 1.6);   // the bed shows in the shallows
+-    col = below * (1.0 - fres) + refl * fres + MOON_WARM * 0.0035 * D * fh / cv * moonSeen;
++    // (1 / n.v capped: at grazing angles the water's own masking would dim it anyway)
++    col = below * (1.0 - fres) + refl * fres + MOON_WARM * 0.0035 * D * fh / max(cv, 0.15) * moonSeen;
+   }
+   // the dim air between deck and ground
+   float haze = 1.0 - exp(-(t - (Y_MIN - ro.y) / rd.y) * 0.0028);
+@@ -1011,9 +1140,34 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
+   }
+   return mix(col, hazeC, haze * 0.8) + glow;
+ }
++// A tall peak's rock above the deck's base: baked moonlight and colour (snow, rock),
++// the cloud's shadow from the bake, open sky and light thrown up from the cloud tops,
++// and the same distance fog as the clouds.
++vec3 rockView(vec3 ro, vec3 rd, float t){
++  vec3 po = ro + rd * t;
++  vec2 uv = po.xz / TILE;
++  float lod = terLod(t);
++  vec4 A = textureLod(uTerA, uv, lod);
++  vec3 alb = textureLod(uTerB, uv, lod).rgb;
++  alb *= alb;
++  vec3 sp = po + uMoonDir * 1.5;   // just off the rock, toward the moon
++  vec4 b = texture(uBake, vec3(sp.x / TILE, sp.z / TILE, clamp((sp.y - Y_MIN) / (Y_MAX - Y_MIN), 0.0, 1.0)));
++  float cloudT = exp(-(-log(max(1.0 - b.r, 2e-3)) * 4.0) * 4.0);
++  float above = smoothstep(-2.0, 8.0, po.y);   // open sky and bright cloud tops around
++  vec3 amb = vec3(0.0050, 0.0068, 0.0120) * A.g * mix(1.0, 3.0, above);
++  vec3 col = alb * (vec3(1.10, 1.22, 1.42) * A.r * cloudT + amb);
++  float fine = texture(uNoise, vec3(po.xz * 0.8, 0.37)).g;
++  col *= mix(1.0, 0.6 + 0.8 * fine, smoothstep(200.0, 60.0, t) * 0.6);
++  // the air above the deck is clear: the thin haze the tall storm towers get, not the deck's
++  float fogA = 1.0 - exp(-t * 0.016 * mix(1.0, 0.3, smoothstep(-8.0, 6.0, po.y)));
++  vec3 fogC = mix(vec3(0.0060, 0.0112, 0.0245) * 0.94, skyBase(rd, uMoonDir) * 0.94, smoothstep(100.0, 250.0, t));
++  return mix(col, fogC, fogA);
++}
+ 
+ void main(){
+   vec4 c = texelFetch(tCloud, ivec2(gl_FragCoord.xy), 0);
++  bool rockRay = c.a < 0.0;          // the cloud pass ended this ray on rock
++  if (rockRay) c.a = -c.a - 1.0;
+ #ifdef PACK
+   float dq = floor(c.a), depthC = dq / 32.0, T = (c.a - dq) / 0.999;
+ #else
+@@ -1022,9 +1176,14 @@ void main(){
+   vec2 ndc = vUv * 2.0 - 1.0;
+   vec3 rd = normalize(uCamF + uCamR * ndc.x * uTanHalf * uAspect + uCamU * ndc.y * uTanHalf);
+   vec3 ro = uCamPos;
+-  if (!(rd.y < 0.0 && T > 0.003 && ((Y_MIN - ro.y) / rd.y <= 200.0 || uNoClouds > 0.5))){ gl_FragColor = c; return; }
+-  float tG;
+-  vec3 S = c.rgb + T * groundView(ro, rd, dot(rd, uMoonDir), tG);
++  // the same march limit as the cloud pass, to find the same rock
++  float tMax = mix(200.0, 320.0, smoothstep(0.0, 0.04, rd.y));
++  tMax = min(tMax, rd.y > 0.0 ? (Y_MAX - ro.y) / rd.y : (Y_MIN - ro.y) / rd.y);
++  float tR = rockRay && T > 0.003 ? peakRockT(ro, rd, tMax) : 1e9;
++  bool rock = tR < tMax;
++  if (!rock && !(rd.y < 0.0 && T > 0.003 && ((Y_MIN - ro.y) / rd.y <= (uNoClouds > 0.5 ? 1000.0 : 200.0)))){ gl_FragColor = c; return; }
++  float tG = tR;
++  vec3 S = c.rgb + T * (rock ? rockView(ro, rd, tR) : groundView(ro, rd, dot(rd, uMoonDir), tG));
+ #ifdef PACK
+   gl_FragColor = vec4(S, floor(clamp(mix(depthC, tG, T), 0.0, 250.0) * 32.0));
+ #else
+@@ -1381,14 +1540,20 @@ function makeTerRT(type) {
+ const terH = makeTerRT(canFloat ? THREE.HalfFloatType : THREE.UnsignedByteType);
+ const terA = makeTerRT(THREE.UnsignedByteType), terB = makeTerRT(THREE.UnsignedByteType), terC = makeTerRT(THREE.UnsignedByteType);
+ const NOCLOUDS = /[?&]noclouds\b/.test(location.search) ? 1 : 0;   // debug: show the ground alone
++// landscape choice (tall peaks or not), saved per viewer; shared by every pass that needs it
++const LAND_STORE = 'moonlit-cloud-sea:land:v1';
++let land = { peaks: true };
++try { const l = JSON.parse(localStorage.getItem(LAND_STORE) || 'null'); if (l && typeof l.peaks === 'boolean') land = l; } catch (e) {}
++const peakU = { uPeaks: { value: land.peaks ? 1 : 0 } };
++const terU = { uTerH: { value: terH.texture }, uTerTop: { value: -50 }, uPixAngC: { value: 0.001 } };
+ const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Object.assign({
+   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uNoClouds: { value: NOCLOUDS }
+-}, camU, lightU));
++}, camU, lightU, peakU, terU));
+ const groundPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + GROUND_FRAG, Object.assign({
+   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, tCloud: { value: null },
+-  uTerH: { value: terH.texture }, uTerA: { value: terA.texture }, uTerB: { value: terB.texture }, uTerC: { value: terC.texture },
+-  uTerTop: { value: -50 }, uPixAngC: { value: 0.001 }, uNoClouds: { value: NOCLOUDS }
+-}, camU, lightU));
++  uTerA: { value: terA.texture }, uTerB: { value: terB.texture }, uTerC: { value: terC.texture },
++  uNoClouds: { value: NOCLOUDS }
++}, camU, lightU, peakU, terU));
+ const taaPass = makePass(TAA_FRAG, {
+   tCur: { value: null }, tHist: { value: null }, uSize: { value: new THREE.Vector2() },
+   uCamPos: camU.uCamPos, uCamR: camU.uCamR, uCamU: camU.uCamU, uCamF: camU.uCamF,
+@@ -1511,7 +1676,7 @@ const status = document.getElementById('status');
+    Light bake: the moon and the clouds never move, so the light reaching every
+    point of the world tile is computed once, in small chunks across a few frames.
+ --------------------------------------------------------------------------- */
+-const bakePass = makePass(BAKE_FRAG, { uNoise: { value: noiseTex }, uMoonDir: { value: MOON_DIR } });
++const bakePass = makePass(BAKE_FRAG, Object.assign({ uNoise: { value: noiseTex }, uMoonDir: { value: MOON_DIR }, uTerH: { value: terH.texture } }, peakU));
+ const BAKE_W = BAKE_N * BAKE_COLS, BAKE_H = BAKE_N * BAKE_ROWS;
+ const bakeRT = new THREE.WebGLRenderTarget(BAKE_W, BAKE_H, {
+   type: THREE.UnsignedByteType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+@@ -1541,19 +1706,18 @@ function bakeStep() {
+     }
+   }
+   bakeTex.needsUpdate = true;
+-  bakeRT.dispose(); bakePass.mat.dispose();
+   bakeChunk = Infinity;
+ }
+ // Terrain bake: the height in 4 strips, then moonlight, colour and horizons in strips
+ // (the lighting pass is the heavy one), then a CPU copy of the heights for lightning.
+-const terHPass = makePass(TER_H_FRAG, { uNoise: { value: noiseTex } });
++const terHPass = makePass(TER_H_FRAG, Object.assign({ uNoise: { value: noiseTex } }, peakU));
+ const terLPass = makePass(TER_L_FRAG, { uNoise: { value: noiseTex }, uTerH: { value: terH.texture }, uMoonDir: { value: MOON_DIR }, uMode: { value: 0 } });
+ const TER_JOBS = [];
+ for (let s = 0; s < 4; s++) TER_JOBS.push({ rt: terH, pass: terHPass, s, n: 4 });
+ for (let s = 0; s < 8; s++) TER_JOBS.push({ rt: terA, pass: terLPass, mode: 0, s, n: 8 });
+ for (let s = 0; s < 2; s++) TER_JOBS.push({ rt: terB, pass: terLPass, mode: 1, s, n: 2 });
+ for (let s = 0; s < 4; s++) TER_JOBS.push({ rt: terC, pass: terLPass, mode: 2, s, n: 4 });
+-let terJob = 0, terHeights = null;
++let terJob = 0, terHeights = null, terDone = false;
+ function terrainStep() {
+   if (terJob < TER_JOBS.length) {
+     const j = TER_JOBS[terJob++], h = TER_N / j.n;
+@@ -1576,11 +1740,10 @@ function terrainStep() {
+     const y = TER_LO_JS + v * TER_RANGE_JS;
+     terHeights[i] = y; if (y > top) top = y;
+   }
+-  groundPass.u.uTerTop.value = top + 0.3;
+-  terHPass.mat.dispose(); terLPass.mat.dispose();
++  terU.uTerTop.value = top + 0.3;
+   return true;
+ }
+-const TER_LO_JS = -100, TER_RANGE_JS = 52, WATER_Y_JS = -85;
++const TER_LO_JS = -100, TER_RANGE_JS = 140, WATER_Y_JS = -85;
+ function halfToFloat(h) {
+   const e = (h >> 10) & 31, m = h & 1023, v = e === 0 ? m * 5.960464477539063e-8 : (1 + m / 1024) * Math.pow(2, e - 15);
+   return (h & 0x8000) ? -v : v;
+@@ -2015,7 +2178,7 @@ function render(dt) {
+   raysPass.u.uFade.value = fade;
+   raysPass.u.uMoonRuv.value = MOON_R / (2 * tanHalf);
+   compPass.u.uPixAng.value = (2 * tanHalf) / (h * DPR);
+-  groundPass.u.uPixAngC.value = (2 * tanHalf) / cloudRT.height;
++  terU.uPixAngC.value = (2 * tanHalf) / cloudRT.height;
+   compPass.u.uRes.value.set(w * DPR, h * DPR);
+ 
+   renderer.setRenderTarget(cloudRT);
+@@ -2077,8 +2240,10 @@ function adapt(rawDt) {
+ 
+ function loop(now) {
+   if (!baked) {
+-    if (bakeChunk !== Infinity) bakeStep();
+-    else if (terrainStep()) { baked = true; status.classList.remove('on'); }
++    // terrain first: the cloud bake reads it for the tall peaks' shadows
++    if (!terDone) terDone = terrainStep();
++    else if (bakeChunk !== Infinity) bakeStep();
++    else { baked = true; status.classList.remove('on'); }
+     last = now; requestAnimationFrame(loop); return;
+   }
+   const raw = Math.max(0, (now - last) / 1000);
+@@ -2184,6 +2349,11 @@ function buildPanel() {
+       <div class="ends"><span>Rare</span><span>Frequent</span></div>
+     </div>
+     <div class="foot" style="margin-top:6px"><span>L sends a flash now</span><button type="button" id="w-now">Flash now</button></div>`;
++  html += `<div class="sec">Landscape</div>
++    <div class="presets" role="group" aria-label="Mountains">
++      <button type="button" id="l-ranges" aria-pressed="false">Rolling ranges</button>
++      <button type="button" id="l-peaks" aria-pressed="false">Tall peaks</button>
++    </div>`;
+   html += `<div class="sec">Performance</div>
+     <div class="stats" aria-live="off">
+       <span>Clouds</span><b id="q-cloud">–</b>
+@@ -2325,6 +2495,29 @@ function flashNow() {
+ }
+ syncStorm();
+ 
++/* ---------------------------------------------------------------------------
++   Landscape: rolling ranges only, or with two tall peaks through the deck.
++   Switching rebakes the terrain and the cloud lighting (the peaks shade the clouds).
++--------------------------------------------------------------------------- */
++const lRanges = document.getElementById('l-ranges'), lPeaks = document.getElementById('l-peaks');
++function syncLand() {
++  lRanges.setAttribute('aria-pressed', String(!land.peaks));
++  lPeaks.setAttribute('aria-pressed', String(land.peaks));
++}
++function setLand(peaks) {
++  if (peaks === land.peaks || !baked) return;
++  land.peaks = peaks;
++  try { localStorage.setItem(LAND_STORE, JSON.stringify(land)); } catch (e) {}
++  syncLand();
++  peakU.uPeaks.value = peaks ? 1 : 0;
++  if (flash) endFlash();
++  terJob = 0; terDone = false; bakeChunk = 0; bakeStart = performance.now();
++  baked = false;
++}
++lRanges.addEventListener('click', () => setLand(false));
++lPeaks.addEventListener('click', () => setLand(true));
++syncLand();
++
+ /* ---------------------------------------------------------------------------
+    Full screen
+ --------------------------------------------------------------------------- */
+@@ -2341,6 +2534,8 @@ window.addEventListener('keydown', e => {
+ 
+ window.__cloudScene = {
+   setTime: v => { simT = v; }, setClock: v => { clock = v; },
++  // testing: the ground or water height at world (x, z), and the highest point of the terrain
++  surfaceY: (x, z) => surfaceY(x, z), terTop: () => terU.uTerTop.value,
+   step: () => { frame++; render(0); renderer.getContext().finish(); },
+   // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
+   strike: (kind, hold) => { if (flash) endFlash(); return startFlash(kind || 'cg', { hold }); },

@@ -1,0 +1,56 @@
+{
+  "mode": "video",
+  "w": 1920,
+  "h": 1080,
+  "scale": 1,
+  "fps": 30,
+  "sub": 2,
+  "t0": 84,
+  "seconds": 60,
+  "crf": 19,
+  "preset": "slow",
+  "out": "moonlit-cloud-sea.mp4",
+  "events": [
+    {
+      "at": 3,
+      "js": "__pick('deep', r => r.at[2] < -200 && r.at[0] > 30)"
+    },
+    {
+      "at": 17,
+      "js": "__pick('cg', r => r.visible >= 0.6 && r.at[2] < -200 && r.at[0] > 30)"
+    },
+    {
+      "at": 23,
+      "js": "window.__cloudScene.meteor()"
+    },
+    {
+      "at": 29,
+      "js": "__pick('deep', r => r.at[2] < -200 && r.at[0] > 30)"
+    },
+    {
+      "at": 35,
+      "js": "__pick('ic', r => r.at[2] < -200 && r.at[0] > 30)"
+    },
+    {
+      "at": 42,
+      "js": "__pick('cg', r => r.visible >= 0.6)"
+    },
+    {
+      "at": 49,
+      "js": "(() => { for (let i = 0; i < 40; i++) if (window.__cloudScene.meteor(true)) return i + 1; return false; })()"
+    },
+    {
+      "at": 55,
+      "js": "__pick('deep', r => r.at[2] < -200 && r.at[0] > 30)"
+    }
+  ],
+  "storage": {
+    "moonlit-cloud-sea:sky:v1": {
+      "twinkle": 1.4,
+      "low": 0.035,
+      "lamps": 1.95,
+      "meteors": 0.5
+    }
+  },
+  "seed": 12345
+}

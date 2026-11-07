@@ -2706,7 +2706,7 @@ function onSkyInput(t) {
 --------------------------------------------------------------------------- */
 const met = { on: false, t: 0, dur: 1, next: Infinity };
 function meteorGap() { return sky.meteors > 0 ? -Math.log(1 - Math.random()) * 60 / sky.meteors : Infinity; }
-function launchMeteor() {
+function launchMeteor(forceFire) {
   // Both ends on screen (the view is a convex cone, so the whole path between them is
   // too), clear of the moon and above the horizon. If the view shows too little sky,
   // skip this one.
@@ -2721,7 +2721,7 @@ function launchMeteor() {
     const e = new THREE.Vector3(A.z, 0, -A.x).normalize(), u = new THREE.Vector3().crossVectors(A, e);
     const th = -Math.PI * (0.12 + Math.random() * 0.76);           // heading: always somewhat downward
     tdir.copy(e).multiplyScalar(Math.cos(th)).addScaledVector(u, Math.sin(th));
-    fire = Math.random() < 0.08;                                    // now and then a bright fireball
+    fire = forceFire === true || Math.random() < 0.08;              // now and then a bright fireball
     L = (fire ? 0.25 : 0.12) + Math.random() * 0.25;                // path length, radians
     B.copy(A).multiplyScalar(Math.cos(L)).addScaledVector(tdir, Math.sin(L));
     ok = B.y > 0.04 && B.dot(MOON_DIR) < Math.cos(0.15) && onScreen(B);
@@ -2739,7 +2739,7 @@ function updateMeteor(dt) {
     if (p < 1) { compPass.u.uMet.value.x = p; return; }
     met.on = false; compPass.u.uMet.value.w = 0;
     met.next = clock + meteorGap();
-  } else if (clock >= met.next) { launchMeteor(); if (!met.on) met.next = clock + meteorGap(); }
+  } else if (!DBG && clock >= met.next) { launchMeteor(); if (!met.on) met.next = clock + meteorGap(); }
 }
 syncSky();
 met.next = clock + meteorGap();
@@ -2762,6 +2762,9 @@ window.__cloudScene = {
   masts: () => groundPass.u.uMast.value.slice(0, groundPass.u.uMastN.value).map(v => v.toArray()),
   setTime: v => { simT = v; }, setClock: v => { clock = v; },
   step: () => { frame++; render(0); renderer.getContext().finish(); },
+  // recording: move time on by dt seconds and draw one frame; send a shooting star now
+  advance: dt => { simT += dt * (reduceMotion ? 0.35 : 1.0); clock += dt; frame++; render(dt); renderer.getContext().finish(); },
+  meteor: fire => { launchMeteor(fire === true); return met.on; },
   // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
   strike: (kind, hold) => { if (flash) endFlash(); return startFlash(kind || 'cg', { hold }); },
   holdFlash: age => { if (flash) flash.hold = age; },
