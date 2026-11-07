@@ -1018,6 +1018,8 @@ uniform vec3 uCamPos, uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime;
 uniform sampler2D uTerH, uTerA, uTerB, uTerC, uTerL;
 uniform float uLamps;   // panel: how bright the town lights are
+uniform vec4 uMast[4];  // radio masts on summits: x, z, base height, flash phase
+uniform float uMastN;
 uniform float uTerTop, uPixAngC, uNoClouds;
 varying vec2 vUv;
 ${COMMON}
@@ -1112,6 +1114,47 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
     // a lake beside a lit town catches its warm glow (the lamps' light, blurred out)
     col += LAMP_C * uLamps * textureLod(uTerL, uv, lod + 3.0).x * 0.10 * (0.35 + fres);
   }
+  // Radio masts on a few summits: a thin dark lattice with red aircraft warning lights,
+  // a flashing beacon on top and a steady light halfway up. A handful of analytic tests
+  // per ground pixel, so the lights sit at the real top of the mast and can blink.
+  const vec3 WARN_C = vec3(1.00, 0.05, 0.02);
+  const float MAST_H = 1.8, MAST_W = 0.07;
+  vec3 beacons = vec3(0.0);
+  float rxz = max(dot(rd.xz, rd.xz), 1e-6);
+  for (int m = 0; m < 4; m++){
+    if (float(m) >= uMastN) break;
+    vec4 M = uMast[m];
+    // the copy of this mast nearest where the ray passes it
+    vec2 mp = po.xz + mod(M.xy - po.xz + 0.5 * TILE, TILE) - 0.5 * TILE;
+    vec2 q = ro.xz + rd.xz * clamp(dot(mp - ro.xz, rd.xz) / rxz, 0.0, t);
+    mp = q + mod(M.xy - q + 0.5 * TILE, TILE) - 0.5 * TILE;
+    float sH = dot(mp - ro.xz, rd.xz) / rxz;          // where the ray passes the mast's line
+    if (sH <= 0.0 || sH > t + 2.0) continue;          // behind the camera, or hidden by the ground
+    float on = smoothstep(0.0, 0.04, fract(uTime * 0.5 + M.w)) * smoothstep(0.36, 0.26, fract(uTime * 0.5 + M.w));
+    float px = uPixAngC * sH;                         // a pixel's width out there
+    // the mast itself, at most a pixel wide
+    float hgt = ro.y + rd.y * sH - M.z;
+    if (hgt > -0.3 && hgt < MAST_H){
+      float dh = length(ro.xz + rd.xz * sH - mp), w = max(px, MAST_W);
+      float cov = MAST_W / w * max(1.0 - dh / w, 0.0);
+      vec3 steel = 0.10 * (MOON_G * 0.5 * lit + SKY_G) + WARN_C * 0.04 * on;
+      col = mix(col, steel, cov * 0.85);
+    }
+    // the two lights: a sharp core about a pixel across and a faint glow in the air
+    for (int k = 0; k < 2; k++){
+      vec3 v = vec3(mp.x, M.z + MAST_H * (k == 0 ? 1.0 : 0.5), mp.y) - ro;
+      float s = dot(v, rd);
+      if (s > t + 2.0) continue;
+      float r = length(v - rd * s) / (uPixAngC * s);   // in pixels
+      float I = k == 0 ? 3.0 * on : 0.7;
+      beacons += WARN_C * I * (exp(-r * r * 1.4) + 0.04 * exp(-r * 0.5)) * exp(-s * 0.0028 * 0.8);
+    }
+    // a flash faintly reddens the summit around the mast's foot
+    if (land){
+      vec2 dg = po.xz - mp;
+      col += WARN_C * on * alb * 0.25 / (1.0 + dot(dg, dg) * 2.0);
+    }
+  }
   // the dim air between deck and ground
   float haze = 1.0 - exp(-(t - (Y_MIN - ro.y) / rd.y) * 0.0028);
   vec3 hazeC = vec3(0.0030, 0.0052, 0.0115) + MOON_COOL * 0.010 * pow(max(cosT, 0.0), 6.0);
@@ -1124,7 +1167,7 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
     vec3 v = segPoint(pm, uLa1, uLb1) - pm;
     glow = LCOL * uLi1 * 0.03 / (1.0 + dot(v, v) * 0.008);
   }
-  return mix(col, hazeC, haze * 0.8) + glow;
+  return mix(col, hazeC, haze * 0.8) + glow + beacons;
 }
 
 void main(){
@@ -1555,6 +1598,7 @@ const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Obj
 const groundPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + GROUND_FRAG, Object.assign({
   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, tCloud: { value: null },
   uTerH: { value: terH.texture }, uTerA: { value: terA.texture }, uTerB: { value: terB.texture }, uTerC: { value: terC.texture }, uTerL: { value: terL.texture }, uLamps: { value: 1 },
+  uMast: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uMastN: { value: 0 },
   uTerTop: { value: -50 }, uPixAngC: { value: 0.001 }, uNoClouds: { value: NOCLOUDS }
 }, camU, lightU));
 const taaPass = makePass(TAA_FRAG, {
@@ -1748,8 +1792,41 @@ function terrainStep() {
     terHeights[i] = y; if (y > top) top = y;
   }
   groundPass.u.uTerTop.value = top + 0.3;
+  placeMasts();
   terHPass.mat.dispose(); terLPass.mat.dispose();
   return true;
+}
+// Radio masts on a few of the highest summits, well apart: find the peaks (blocks of the
+// height map that are the highest for ~30 units around), then take the tallest few.
+function placeMasts() {
+  const B = 16, NB = TER_N / B, bh = new Float32Array(NB * NB), bi = new Int32Array(NB * NB);
+  bh.fill(-1e9);
+  for (let j = 0; j < TER_N; j++) for (let i = 0; i < TER_N; i++) {
+    const k = (j / B | 0) * NB + (i / B | 0), y = terHeights[j * TER_N + i];
+    if (y > bh[k]) { bh[k] = y; bi[k] = j * TER_N + i; }
+  }
+  const peaks = [];
+  for (let bj = 0; bj < NB; bj++) for (let bx = 0; bx < NB; bx++) {
+    const y = bh[bj * NB + bx];
+    if (y < WATER_Y_JS + 14) continue;
+    let top = true;
+    for (let dj = -2; dj <= 2 && top; dj++) for (let di = -2; di <= 2; di++) {
+      if (!di && !dj) continue;
+      if (bh[((bj + dj + NB) % NB) * NB + (bx + di + NB) % NB] > y) { top = false; break; }
+    }
+    if (top) peaks.push({ i: bi[bj * NB + bx], y });
+  }
+  peaks.sort((a, b) => b.y - a.y);
+  const f = LT.TILE / TER_N, picked = [];
+  const wrap = d => ((d + LT.TILE / 2) % LT.TILE + LT.TILE) % LT.TILE - LT.TILE / 2;
+  for (const p of peaks) {
+    if (picked.length >= 4) break;
+    const x = (p.i % TER_N + 0.5) * f, z = ((p.i / TER_N | 0) + 0.5) * f;
+    if (picked.some(q => Math.hypot(wrap(x - q.x), wrap(z - q.z)) < 45)) continue;
+    picked.push({ x, z, y: p.y });
+  }
+  picked.forEach((p, k) => groundPass.u.uMast.value[k].set(p.x, p.z, p.y - 0.1, hash12js(k * 7.3 + 1.1, 3.7)));
+  groundPass.u.uMastN.value = picked.length;
 }
 const TER_LO_JS = -100, TER_RANGE_JS = 52, WATER_Y_JS = -85;
 function halfToFloat(h) {
@@ -2555,6 +2632,7 @@ window.addEventListener('keydown', e => {
 });
 
 window.__cloudScene = {
+  masts: () => groundPass.u.uMast.value.slice(0, groundPass.u.uMastN.value).map(v => v.toArray()),
   setTime: v => { simT = v; }, setClock: v => { clock = v; },
   step: () => { frame++; render(0); renderer.getContext().finish(); },
   // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
