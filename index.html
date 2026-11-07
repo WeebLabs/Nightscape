@@ -2287,7 +2287,8 @@ function updateLightning(dt) {
   return on;
 }
 
-let simT = DBG && DBG.t !== undefined ? DBG.t : 30;
+// start well before the tall tower ahead covers the moon (from about -12 s to 90 s)
+let simT = DBG && DBG.t !== undefined ? DBG.t : -60;
 let clock = 0, frame = 0, last = performance.now();
 let perfAcc = 0, perfN = 0, lastScaleChange = 0, lastDrop = -1e9;
 let shown = false;
