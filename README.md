@@ -94,6 +94,7 @@ Settings you choose in the panel are saved in that browser's local storage. A wa
 | `L` | Sends a lightning flash now |
 | `Shift`+`L` | Sends a distant storm flash now, each time from a new position |
 | `M` | Sends a shooting star now |
+| `P` | Sends an aircraft now |
 | `S` | Turns sound on or off. If sound is on but has not started yet, it starts it |
 
 In the settings panel, the left and right arrow keys move between tabs when a tab has keyboard focus, and `Home` and `End` jump to the first and last tab. The other keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
@@ -178,6 +179,18 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | How often | Off to 6 per minute | 2 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely |
 | Shooting star | Button | | Sends a shooting star immediately, like `M` |
 
+**Aircraft**
+
+| Control | Range | Default | What it does |
+| --- | --- | --- | --- |
+| How often | Off to every 20 min | Every ~8 min | The average time between aircraft. Each gap is random, between 75% and 125% of this, and a new aircraft never starts while the last one's contrail is still in the sky |
+| Light brightness | ×0.2 to ×3 | ×1 | Brightness of the white light and the blinking red and green wingtip lights |
+| Contrail | None to ×3 | ×1 | Brightness of the contrail |
+| Contrail lasts | ×0.3 to ×3 | ×1 | How slowly the contrail fades. At ×1 it fades over about 2.5 minutes |
+| Contrail glitter | None to ×3 | ×1 | How strongly ice crystals in the contrail glint in the moonlight |
+| Reset | Button | | Returns every aircraft setting to its default |
+| Aircraft | Button | | Sends an aircraft immediately, like `P`. It starts at the far end of its course, so it may first appear as a faint point near the horizon |
+
 **Ground**
 
 | Control | Range | Default | What it does |
@@ -218,6 +231,7 @@ All settings are saved per browser in `localStorage`, under these keys:
 | `moonlit-cloud-sea:grade:v1` | Colour grade and selected preset |
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
+| `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
 | `moonlit-cloud-sea:sky:v1` | Twinkle, star reach, shooting star rate and town light brightness |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
@@ -256,6 +270,8 @@ To return everything to the defaults, clear the site's storage in the browser, o
 - **In-cloud flashes** make up the rest. They fire between charge regions near the tower's surface as a train of pulses that wander along the channel. On towers with an anvil, some run as "crawlers" just under the anvil base.
 
 Each flash lights the cloud from inside along its channel. Light from a buried channel scatters many times before it escapes, so it fades far more gently than direct moonlight and spreads through the whole tower. A ground strike also lights the land, water and rainy air around its strike point. The visible bolt is drawn at full resolution as a jagged, branching channel, and cloud in front of it hides or veils it.
+
+**Aircraft.** Every eight minutes or so, an airliner cruises far above the clouds on a random straight course. About two in five pass more or less overhead, coming toward the camera or heading away into the distance, and the rest cross slowly far off, low over the horizon. Each course is checked against the view and used only if the aircraft stays in sight for at least 40 seconds. The aircraft shows a tiny steady white light and red and green wingtip lights that blink alternately, on the correct sides for its direction. Its contrail is a moonlit line that starts a short way behind it, spreads wider and fades as it ages, and is brighter toward the moon. Now and then a single ice crystal in the trail glints faintly for about a second. Clouds hide the aircraft and its trail, and both are dimmer low down, where their light crosses more air.
 
 **Distant storms.** Now and then a storm far beyond the horizon, too far away to hear, flickers. Its light shows as a soft glow low in the sky, sitting behind the cloud layer, so the distant cloud tops stand out dark against it while their thin edges catch a little of the light. A flash is a short train of soft pulses, each lighting a slightly different part of the storm. A storm stays in one direction for a while before another builds elsewhere in view, so flashes repeat from the same place as a real storm's would.
 
@@ -354,11 +370,11 @@ The configuration file accepts these fields:
 | `crf`, `preset` | x264 quality and speed settings |
 | `seed` | Random seed |
 | `storage` | Optional saved settings to load, keyed by the `localStorage` keys listed in [Saved settings](#saved-settings) |
-| `events` | Scripts to run at given times. `__pick(kind, test)` re-rolls a flash of kind `deep`, `cg` (ground strike) or `ic` (in-cloud) until `test` accepts it, `window.__cloudScene.meteor(fireball)` sends a shooting star, and `window.__cloudScene.farFlash()` sends a distant storm flash |
+| `events` | Scripts to run at given times. `__pick(kind, test)` re-rolls a flash of kind `deep`, `cg` (ground strike) or `ic` (in-cloud) until `test` accepts it, `window.__cloudScene.meteor(fireball)` sends a shooting star, and `window.__cloudScene.farFlash()` sends a distant storm flash, and `window.__cloudScene.aircraft()` sends an aircraft |
 | `out` | Output file, relative to the configuration file |
 | `frames` | Optional folder, relative to the configuration file, to save numbered PNG frames in instead of making a video, for example to build a GIF |
 
-Automatic lightning, distant storms and shooting stars are disabled while recording, so only the scripted events happen. Recordings are silent. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
+Automatic lightning, distant storms, aircraft and shooting stars are disabled while recording, so only the scripted events happen. Recordings are silent. On an Apple M1 Max a 60-second 1080p video at the example settings takes about 11 minutes.
 
 ## Optimisations still to make
 
@@ -412,6 +428,7 @@ The scene was built iteratively from a short brief and reference photos of moonl
 26. **Sound.** Synthesised wind with a whistle in the gusts, and delayed thunder after each lightning flash, with controls.
 27. **Distant storms.** Silent flickers of lightning beyond the horizon, with detailed controls.
 28. **Settings tabs.** The settings panel was organised into five tabs.
+29. **Aircraft.** Occasional airliners on random courses, with navigation lights and a glittering moonlit contrail.
 
 ## Files
 

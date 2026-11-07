@@ -1317,6 +1317,12 @@ uniform vec4 uMet;           // progress 0..1, brightness, trail length (fractio
 uniform vec4 uFar;           // a storm beyond the horizon: its direction (level) and how bright it is flashing now
 uniform vec3 uFarShape;      // the glow's half-width (radians across), centre height and height scale (radians)
 uniform vec4 uFarCol;        // the glow's colour, and how much it lights the nearer clouds
+uniform float uAirOn;        // 1 while an aircraft or its contrail is in the sky
+uniform vec3 uAirW, uAirR, uAirG;   // directions to its white light and its red and green wingtip lights
+uniform vec3 uAirI;          // how bright each of those is now
+uniform vec3 uConA, uConB;   // its contrail as a straight segment, oldest end to newest, relative to the camera
+uniform vec4 uCon;           // the contrail's age at A and at B (seconds), its fade time, its brightness
+uniform float uGlitter;      // how much the contrail's ice crystals glint
 uniform sampler2D uMoonMap;
 uniform vec3 uBalance, uShadowTint, uHighTint;
 uniform float uShadowAmt, uHighAmt, uLift, uSat, uContrast, uVignette, uGrain, uRays;
@@ -1420,6 +1426,66 @@ vec3 meteor(vec3 rd){
   return c * env * uMet.y;
 }
 
+// An aircraft far off: three pin-point lights, a steady white one and blinking red and
+// green ones at the wingtips (spaced a pixel or two apart so they can be told apart).
+vec3 airLight(vec3 rd, vec3 d, vec3 col){
+  vec3 v = rd - d;
+  float th2 = dot(v, v), wr = max(uPixAng * 1.0, 2.0e-4);
+  if (th2 > 100.0 * wr * wr) return vec3(0.0);
+  return col * (exp(-th2 / (wr * wr)) + 0.06 * exp(-sqrt(th2) / (wr * 2.5)));
+}
+// Its contrail: a straight line in the world from where the trail is oldest to the
+// aircraft. Each pixel finds the point on the line nearest its view ray; the trail there
+// has spread wider and faded with age, and starts a little way behind the aircraft.
+// It is lit by the moon, so it is brighter toward the moon.
+vec3 contrail(vec3 rd){
+  vec3 A = uConA, d = uConB - uConA;
+  float b = dot(rd, d), cc = dot(d, d), dp = -dot(rd, A), e = -dot(d, A);
+  float D = cc - b * b;
+  float u = clamp(D > 1e-6 ? (e - b * dp) / D : 0.0, 0.0, 1.0);
+  vec3 q = A + u * d;
+  float s = dot(q, rd);
+  if (s <= 0.0) return vec3(0.0);
+  float age = mix(uCon.x, uCon.y, u);
+  float w = 1.0 + 0.08 * age;                      // width in world units: it spreads as it ages
+  float wa = max(w / s, uPixAng * 0.9);            // angular width, never under a pixel
+  float r = length(q - s * rd) / s / wa;
+  if (r > 3.0) return vec3(0.0);
+  float k = uCon.w * exp(-age / uCon.z) * smoothstep(1.5, 5.0, age) * min(1.5 / w, 1.0) * (w / s) / wa;
+  float ph = 1.0 + 1.5 * pow(max(dot(rd, uMoonDir), 0.0), 6.0);
+  vec3 col = vec3(0.60, 0.66, 0.78) * 0.035 * k * ph * exp(-r * r);
+  // Glitter: now and then an ice crystal in the trail catches the moon, as a pin-point
+  // of light. The trail is cut into short cells; about two in five hold a crystal at a
+  // random spot along and across the trail, which glints for about a second at its own
+  // slow, random moments. Each pixel checks its own cell and the two beside it, so a
+  // glint is never cut off at a cell edge.
+  if (uGlitter > 0.0){
+    vec3 dn = d / sqrt(cc), sv = cross(dn, rd);
+    float sinT = max(length(sv), 1e-4);
+    float across = dot(q - s * rd, sv / sinT) / s;       // angle across the trail
+    float along = u * sqrt(cc) / 4.0;                     // in cells of 4 world units
+    float gp = uPixAng * 0.6, gsum = 0.0;
+    for (int j = -1; j <= 1; j++){
+      float id = floor(along) + float(j);
+      if (hash12(vec2(id, 3.3)) > 0.4) continue;
+      float h1 = hash12(vec2(id, 7.1)), h3 = hash12(vec2(id, 5.7)), h4 = hash12(vec2(id, 9.9));
+      float da = (along - id - 0.2 - 0.6 * h3) * 4.0 * sinT / s;
+      float dc = across - (h4 - 0.5) * 1.2 * wa;
+      float tw = pow(max(sin(uTime * (0.25 + 0.5 * h1) + h1 * 60.0), 0.0), 30.0);
+      gsum += tw * exp(-(da * da + dc * dc) / (gp * gp));
+    }
+    col += vec3(0.92, 0.96, 1.0) * 0.1 * uGlitter * gsum * uCon.w * exp(-age / uCon.z) * smoothstep(1.5, 5.0, age) * ph;
+  }
+  return col;
+}
+vec3 aircraft(vec3 rd){
+  vec3 col = contrail(rd);
+  col += airLight(rd, uAirW, vec3(1.0, 0.95, 0.88)) * uAirI.x;
+  col += airLight(rd, uAirR, vec3(1.0, 0.10, 0.06)) * uAirI.y;
+  col += airLight(rd, uAirG, vec3(0.12, 1.0, 0.35)) * uAirI.z;
+  return col * mix(0.5, 1.0, smoothstep(0.02, 0.15, rd.y));   // dimmer low down, through more air
+}
+
 vec3 moonDisk(vec3 rd, vec3 m){
   float c = dot(rd, m);
   if (c < 0.9) return vec3(0.0);
@@ -1464,6 +1530,7 @@ void main(){
   // the hero stars low over the horizon (the regular field has faded out there)
   if (rd.y > 0.0 && rd.y < 0.3 && c.a > 0.0) st += heroStars(rd) * smoothstep(0.0, 0.015, rd.y) * smoothstep(0.03, 0.2, am);
   if (uMet.w > 0.0 && rd.y > 0.0 && c.a > 0.0) st += meteor(rd) * smoothstep(0.0, 0.03, rd.y);
+  if (uAirOn > 0.0 && rd.y > 0.0 && c.a > 0.0) st += aircraft(rd) * smoothstep(0.0, 0.02, rd.y);
   vec3 sky = skyBase(rd, m) * (1.0 - 0.82 * diskMask) + st + moonDisk(rd, m);
 
   vec3 col = c.rgb + sky * c.a;
@@ -1692,7 +1759,9 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   uLift: { value: 0 }, uSat: { value: 1 }, uContrast: { value: 1 }, uVignette: { value: 0.38 },
   uGrain: { value: 0.007 }, uRays: { value: 1 },
   tBolt: { value: null }, uBoltOn: { value: 0 }, uSkyFlash: { value: new THREE.Vector3() }, uFlashDir: { value: new THREE.Vector3(0, 1, 0) },
-  uFar: { value: new THREE.Vector4(0, 0, -1, 0) }, uFarShape: { value: new THREE.Vector3(0.1, 0, 0.04) }, uFarCol: { value: new THREE.Vector4(1, 0.84, 0.74, 1) }
+  uFar: { value: new THREE.Vector4(0, 0, -1, 0) }, uFarShape: { value: new THREE.Vector3(0.1, 0, 0.04) }, uFarCol: { value: new THREE.Vector4(1, 0.84, 0.74, 1) },
+  uAirOn: { value: 0 }, uAirW: { value: new THREE.Vector3(0, 1, 0) }, uAirR: { value: new THREE.Vector3(0, 1, 0) }, uAirG: { value: new THREE.Vector3(0, 1, 0) },
+  uAirI: { value: new THREE.Vector3() }, uConA: { value: new THREE.Vector3() }, uConB: { value: new THREE.Vector3() }, uCon: { value: new THREE.Vector4(0, 0, 150, 0) }, uGlitter: { value: 1 }
 }, camU));
 
 // NASA LRO lunar albedo map (public domain), 512 x 256, embedded
@@ -2329,6 +2398,7 @@ function render(dt) {
   const boltOn = updateLightning(dt);
   updateMeteor(dt);
   updateFar(dt);
+  updateAircraft();
   updateSound();
 
   // moon position on screen for the light shafts
@@ -2543,6 +2613,13 @@ function buildPanel() {
     <div class="sec">Shooting stars</div>
     ${row('s-meteors', 'How often', 0, 6, 0.1, 'Off', 'Often')}
     ${foot('M sends one now', '<button type="button" id="s-met-now">Shooting star</button>')}
+    <div class="sec">Aircraft</div>
+    ${row('p-every', 'How often', 0, 20, 0.5, 'Off', 'Rarely')}
+    ${row('p-lights', 'Light brightness', 0.2, 3, 0.05, 'Faint', 'Bright')}
+    ${row('p-trail', 'Contrail', 0, 3, 0.05, 'None', 'Bright')}
+    ${row('p-fade', 'Contrail lasts', 0.3, 3, 0.05, 'Short', 'Long')}
+    ${row('p-glitter', 'Contrail glitter', 0, 3, 0.05, 'None', 'Strong')}
+    ${foot('P sends one now', '<button type="button" id="p-reset">Reset</button><button type="button" id="p-now">Aircraft</button>')}
     <div class="sec">Ground</div>
     ${row('s-lamps', 'Town lights', 0, 3, 0.05, 'Off', 'Bright')}`;
 
@@ -2610,6 +2687,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'q-scale' || t.id === 'q-auto') { onQualityInput(t); return; }
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id.startsWith('d-')) { onFarInput(t); return; }
+  if (t.id.startsWith('p-')) { onAirInput(t); return; }
   if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
@@ -2625,6 +2703,8 @@ gradeBody.addEventListener('click', e => {
   if (b.id === 'w-now') { flashNow(); return; }
   if (b.id === 'w-far-now') { farNow(); return; }
   if (b.id === 'd-reset') { resetFar(); return; }
+  if (b.id === 'p-now') { airNow(); return; }
+  if (b.id === 'p-reset') { resetAir(); return; }
   if (b.id === 's-met-now') { launchMeteor(); return; }
   const name = b.dataset.preset || (b.id === 'g-reset' ? (grade.preset in GRADE_PRESETS ? grade.preset : GRADE_DEFAULT) : null);
   if (!name) return;
@@ -2643,6 +2723,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'L' && e.shiftKey) farNow();
   else if (e.key === 'l' || e.key === 'L') flashNow();
   if (e.key === 'm' || e.key === 'M') launchMeteor();
+  if (e.key === 'p' || e.key === 'P') airNow();
   if (e.key === 's' || e.key === 'S') { if (sound.on && !soundLive()) startSound(); else setSoundOn(!sound.on); }
 });
 // show the controls once the scene is up; hide cursor and closed button when idle
@@ -2837,6 +2918,96 @@ function onFarInput(t) {
 function resetFar() { farCfg = Object.assign({}, FAR_DEFAULT); far.next = clock + farGap(); saveFar(); syncFar(); }
 syncFar();
 far.next = clock + 4 + farGap();
+
+/* ---------------------------------------------------------------------------
+   Aircraft: every few minutes an airliner cruises far above the clouds, on a random
+   straight course. Some pass more or less overhead, coming toward us or going away;
+   most cross far off, low over the horizon. Each shows a steady white light and
+   blinking red (left) and green (right) wingtip lights, and leaves a moonlit contrail
+   that spreads, fades and glitters as its ice crystals catch the moon.
+--------------------------------------------------------------------------- */
+const AIR_STORE = 'moonlit-cloud-sea:aircraft:v1';
+const AIR_DEFAULT = { every: 8, lights: 1, trail: 1, fade: 1, glitter: 1 };
+let airCfg = Object.assign({}, AIR_DEFAULT);
+try { const d = JSON.parse(localStorage.getItem(AIR_STORE) || 'null'); if (d && d.every >= 0) airCfg = Object.assign(airCfg, d); } catch (e) {}
+const air = { on: false, t0: 0, life: 0, next: Infinity, S: new THREE.Vector3(), V: new THREE.Vector3(), h: new THREE.Vector3(), wing: new THREE.Vector3(), pre: 0 };
+const _ap = new THREE.Vector3(), _ar = new THREE.Vector3();
+function airGap() { return airCfg.every > 0 ? Math.max(airCfg.every, 1) * 60 * (0.75 + 0.5 * Math.random()) : Infinity; }
+function launchAircraft() {
+  const cp = camU.uCamPos.value, F = camU.uCamF.value, R = camU.uCamR.value, U = camU.uCamU.value;
+  const tx = camU.uTanHalf.value * camU.uAspect.value * 0.95, ty = camU.uTanHalf.value * 0.95;
+  const inView = v => { const z = v.dot(F); return z > 0 && Math.abs(v.dot(R) / z) < tx && Math.abs(v.dot(U) / z) < ty; };
+  const v = new THREE.Vector3();
+  // Any heading, passing its nearest point to us either nearly overhead (2 in 5) or far
+  // off; keep the first course that stays in view for at least 40 seconds.
+  for (let tries = 0; tries < 60; tries++) {
+    const th = Math.random() * 2 * Math.PI, h = new THREE.Vector3(Math.sin(th), 0, -Math.cos(th));
+    const side = new THREE.Vector3(-h.z, 0, h.x);
+    const m = (Math.random() < 0.4 ? Math.random() * 700 : 1200 + Math.random() * 2800) * (Math.random() < 0.5 ? -1 : 1);
+    const H = 120 + Math.random() * 90, speed = 14 + Math.random() * 8, L = 3500;
+    const S = new THREE.Vector3(cp.x + side.x * m, cp.y + H, cp.z + side.z * m).addScaledVector(h, -L);
+    const life = 2 * L / speed;
+    let seen = 0;
+    for (let t = 0; t < life; t += 4) { v.copy(S).addScaledVector(h, speed * t).sub(cp).normalize(); if (inView(v)) seen += 4; }
+    if (seen < 40) continue;
+    air.S.copy(S); air.V.copy(h).multiplyScalar(speed); air.h.copy(h);
+    air.wing.set(-h.z, 0, h.x);                                 // towards the right (green) wingtip
+    Object.assign(air, { on: true, t0: clock, pre: 1500 / speed, life: life + 150 * airCfg.fade });
+    air.next = clock + Math.max(airGap(), air.life + 20);
+    return true;
+  }
+  return false;
+}
+function updateAircraft() {
+  const u = compPass.u;
+  if (!air.on) {
+    u.uAirOn.value = 0;
+    if (!DBG && clock >= air.next && !launchAircraft()) air.next = clock + 30;
+    if (!air.on) return;
+  }
+  const t = clock - air.t0;
+  if (t > air.life) { air.on = false; u.uAirOn.value = 0; return; }
+  const cp = camU.uCamPos.value;
+  const rel = _ar.copy(air.S).addScaledVector(air.V, t).sub(cp), dist = rel.length();
+  const out = Math.min((air.life - t) / 30, 1);
+  const k = THREE.MathUtils.clamp(700 / dist, 0.25, 1) * airCfg.lights * Math.min(t / 15, 1) * out;
+  const sp = 2.5 * u.uPixAng.value * dist;                     // wingtip lights a couple of pixels apart
+  u.uAirW.value.copy(rel).normalize();
+  u.uAirR.value.copy(rel).addScaledVector(air.wing, -sp).normalize();
+  u.uAirG.value.copy(rel).addScaledVector(air.wing, sp).normalize();
+  const blink = x => (x - Math.floor(x) < 0.3 ? 1 : 0);
+  u.uAirI.value.set(1.4 * k, 2.0 * k * blink(t / 1.5), 2.0 * k * blink(t / 1.5 + 0.5));
+  // the trail reaches back beyond where the aircraft first appeared
+  u.uConA.value.copy(air.S).addScaledVector(air.h, -1500).sub(cp);
+  u.uConB.value.copy(rel);
+  u.uCon.value.set(t + air.pre, 0, 150 * airCfg.fade, airCfg.trail * Math.min(t / 20, 1) * out);
+  u.uGlitter.value = airCfg.glitter;
+  u.uAirOn.value = 1;
+}
+function airNow() { if (!baked) return; air.on = false; launchAircraft(); }
+const AIR_READ = {
+  every: v => v === 0 ? 'off' : 'every ~' + v + ' min',
+  lights: v => '×' + v.toFixed(2),
+  trail: v => v === 0 ? 'off' : '×' + v.toFixed(2),
+  fade: v => 'fades over ~' + +(v * 150 / 60).toFixed(1) + ' min',
+  glitter: v => v === 0 ? 'off' : '×' + v.toFixed(2)
+};
+function syncAir() {
+  for (const k in AIR_READ) {
+    document.getElementById('p-' + k).value = airCfg[k];
+    document.getElementById('p-' + k + '-v').textContent = AIR_READ[k](+airCfg[k]);
+  }
+}
+function saveAir() { try { localStorage.setItem(AIR_STORE, JSON.stringify(airCfg)); } catch (e) {} }
+function onAirInput(t) {
+  const k = t.id.slice(2);
+  airCfg[k] = parseFloat(t.value);
+  if (k === 'every' && !air.on) air.next = clock + airGap();
+  saveAir(); syncAir();
+}
+function resetAir() { airCfg = Object.assign({}, AIR_DEFAULT); saveAir(); syncAir(); }
+syncAir();
+air.next = clock + 90 + Math.random() * 150;     // the first one comes within a few minutes
 
 /* ---------------------------------------------------------------------------
    Sky and ground: how much the stars twinkle, how close to the horizon they reach,
@@ -3118,6 +3289,8 @@ window.__cloudScene = {
   advance: dt => { simT += dt * (reduceMotion ? 0.35 : 1.0); clock += dt; frame++; render(dt); renderer.getContext().finish(); },
   meteor: fire => { launchMeteor(fire === true); return met.on; },
   farFlash: () => { farFlash(); return Object.assign({}, far.cell); },
+  aircraft: () => { airNow(); return air.on ? { heading: +(Math.atan2(air.h.x, -air.h.z) * 180 / Math.PI).toFixed(0), life: Math.round(air.life) } : null; },
+  airState: () => air.on ? { clock: +clock.toFixed(2), t: +(clock - air.t0).toFixed(1), w: compPass.u.uAirW.value.toArray().map(v => +v.toFixed(3)), dist: Math.round(_ar.length()), I: compPass.u.uAirI.value.toArray() } : null,
   farState: () => ({ on: far.on, u: compPass.u.uFar.value.toArray(), shape: compPass.u.uFarShape.value.toArray(), inShader: !!compPass.u.uFar }),
   // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
   strike: (kind, hold) => { if (flash) endFlash(); return startFlash(kind || 'cg', { hold }); },
