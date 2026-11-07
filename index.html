@@ -1820,7 +1820,7 @@ function placeMasts() {
   const f = LT.TILE / TER_N, picked = [];
   const wrap = d => ((d + LT.TILE / 2) % LT.TILE + LT.TILE) % LT.TILE - LT.TILE / 2;
   for (const p of peaks) {
-    if (picked.length >= 4) break;
+    if (picked.length >= 2) break;
     const x = (p.i % TER_N + 0.5) * f, z = ((p.i / TER_N | 0) + 0.5) * f;
     if (picked.some(q => Math.hypot(wrap(x - q.x), wrap(z - q.z)) < 45)) continue;
     picked.push({ x, z, y: p.y });
