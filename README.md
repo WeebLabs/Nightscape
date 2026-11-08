@@ -4,6 +4,8 @@ A live, endless flight just above a moonlit sea of clouds, rendered in real time
 
 **[Open the live demo](https://weeblabs.github.io/Nightscape/)**
 
+You are welcome to join the [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS), where all of my projects are discussed. Many members share their own creations there and help each other out, so it is a good place to show off your setup, ask a question or suggest an idea.
+
 ![A flight over a sea of clouds at night as the full moon comes out from behind a tall cloud](media/flight.gif)
 
 *The flight in this clip runs at 2.6 times its normal speed, without film grain.*
@@ -38,6 +40,7 @@ A live, endless flight just above a moonlit sea of clouds, rendered in real time
 - [Known limitations](#known-limitations)
 - [Development history](#development-history)
 - [Files](#files)
+- [Community and support](#community-and-support)
 - [Credits](#credits)
 
 ## What it is
@@ -440,6 +443,12 @@ The scene was built iteratively from a short brief and reference photos of moonl
 | `tools/record.mjs` | The offline video recorder |
 | `tools/example-video.json` | An example recorder configuration for a 60-second 1080p video |
 | `experiments/tall-peaks.patch` | An unmerged experiment that adds two tall massifs per tile rising through the cloud deck |
+
+## Community and support
+
+The [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS) is the home of all my projects, including this one. Members share what they have made, help each other with problems and hear about new work first. Questions, bug reports and ideas for Nightscape are all welcome there.
+
+Nightscape is free to use. If you enjoy it and would like to support further work, you can donate through [Ko-fi](https://ko-fi.com/weeblabs) or [Patreon](https://patreon.com/weeblabs). The same links appear under the **Sponsor** button at the top of this repository.
 
 ## Credits
 
