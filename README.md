@@ -42,6 +42,7 @@ You are welcome to join the [Weeb Labs Discord server](https://discord.gg/RCyqxA
 - [Files](#files)
 - [Community and support](#community-and-support)
 - [Credits](#credits)
+- [Licence](#licence)
 
 ## What it is
 
@@ -454,3 +455,7 @@ Nightscape is free to use. If you enjoy it and would like to support further wor
 
 - Lunar map: NASA / GSFC Scientific Visualization Studio, CGI Moon Kit (LRO LROC data). Public domain.
 - Three.js: MIT licence.
+
+## Licence
+
+Nightscape is released under the [MIT License](LICENSE). The lunar map and Three.js keep their own terms, which are listed under [Credits](#credits).
