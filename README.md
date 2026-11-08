@@ -4,7 +4,7 @@ A live, endless flight just above a moonlit sea of clouds, rendered in real time
 
 **[Open the live demo](https://weeblabs.github.io/Nightscape/)**
 
-You are welcome to join the [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS), where all of my projects are discussed. Many members share their own creations there and help each other out, so it is a good place to show off your setup, ask a question or suggest an idea.
+Be sure to stop by the [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS), where you'll find plenty of impassioned nerbs sharing their creations and offering a helping hand!
 
 ![A flight over a sea of clouds at night as the full moon comes out from behind a tall cloud](media/flight.gif)
 
@@ -447,7 +447,7 @@ The scene was built iteratively from a short brief and reference photos of moonl
 
 ## Community and support
 
-The [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS) is the home of all my projects, including this one. Members share what they have made, help each other with problems and hear about new work first. Questions, bug reports and ideas for Nightscape are all welcome there.
+The [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS) is home to all of my projects, Nightscape included. Drop in to show off what you've made, ask for help, report a bug or pitch an idea. You'll usually find someone happy to dig in!
 
 Nightscape is free to use. If you enjoy it and would like to support further work, you can donate through [Ko-fi](https://ko-fi.com/weeblabs) or [Patreon](https://patreon.com/weeblabs). The same links appear under the **Sponsor** button at the top of this repository.
 
