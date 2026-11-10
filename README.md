@@ -207,7 +207,7 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Town lights | Off to ×3 | ×1.95 | Brightness of the town, road and farmhouse lights and the glow they cast on the ground and lakes. It is a single multiplication at render time and needs no rebake. It does not affect the red mast lights |
-| Glow on clouds | None to ×3 | ×1 | How strongly the towns' scattered orange glow lights the deck from below. It shows on the underside of the cloud and creeps a little way up the walls of gaps. It grows as the moon thins: at ×1 it runs from a faint 0.2 at full moon to 0.55 at new moon, following the lit percentage, and the setting multiplies both ends. It also scales with Town lights |
+| Glow on clouds | None to ×3 | ×0.85 | How strongly the towns' scattered orange glow lights the deck from below. It shows on the underside of the cloud and creeps a little way up the walls of gaps. It grows as the moon thins: at ×1 it runs from a faint 0.2 at full moon to 0.55 at new moon, following the lit percentage, and the setting multiplies both ends. It also scales with Town lights |
 
 ### Sound
 
