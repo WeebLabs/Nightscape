@@ -105,6 +105,14 @@
   }
   #grade .presets button:hover { border-color: var(--accent); }
   #grade .presets button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #062421; }
+  #grade .presets button.mine { border-style: dashed; }   /* the viewer's own saved profiles */
+  #grade .presets button.draft { font-style: italic; }   /* unsaved changes */
+  #grade .saverow { display: flex; gap: 6px; margin-top: 8px; }
+  #grade .saverow input { flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--panel-fg); background: rgba(0, 0, 0, 0.25); border: 1px solid var(--panel-line); border-radius: 8px; padding: 5px 8px; }
+  #grade .saverow button { font: inherit; color: var(--panel-fg); background: transparent; border: 1px solid var(--panel-line); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+  #grade .saverow button:hover { border-color: var(--accent); }
+  #grade .savemsg { min-height: 0; font-size: 11px; color: var(--panel-muted); margin-top: 4px; }
+  #grade .savemsg:empty { display: none; }
   #grade .sec { margin: 12px 0 6px; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--panel-muted); }
   #grade .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; margin: 7px 0; }
   #grade .row label { color: var(--panel-fg); }
@@ -2790,6 +2798,22 @@ let grade = null;
 try { grade = JSON.parse(localStorage.getItem(GRADE_STORE) || 'null'); } catch (e) { grade = null; }
 if (!grade || typeof grade !== 'object') grade = Object.assign({ preset: GRADE_DEFAULT }, GRADE_PRESETS[GRADE_DEFAULT]);
 for (const k in GRADE_PRESETS[GRADE_DEFAULT]) if (grade[k] === undefined) grade[k] = GRADE_PRESETS[GRADE_DEFAULT][k];
+// The viewer's own saved profiles, by name. grade.preset is the profile in use: a built-in one,
+// one of these, or 'Custom' for unsaved changes, which remember the profile they started from
+// (grade.base) so Revert can go back to it. Unsaved changes left by picking another profile wait
+// in grade.draft, behind the Custom button. A saved profile only ever changes on Save.
+const PROFILE_STORE = 'moonlit-cloud-sea:grade-profiles:v1';
+const GRADE_KEYS = Object.keys(GRADE_PRESETS[GRADE_DEFAULT]);
+const gradeValues = src => { const v = {}; for (const k of GRADE_KEYS) v[k] = src && src[k] !== undefined ? src[k] : GRADE_PRESETS[GRADE_DEFAULT][k]; return v; };
+let profiles = Object.create(null);   // (no inherited names, so any name the viewer types is safe)
+try { const p = JSON.parse(localStorage.getItem(PROFILE_STORE) || 'null'); if (p && typeof p === 'object') for (const n in p) profiles[n] = gradeValues(p[n]); } catch (e) {}
+const isBuiltIn = name => Object.prototype.hasOwnProperty.call(GRADE_PRESETS, name);
+const profileValues = name => isBuiltIn(name) ? GRADE_PRESETS[name] : (name in profiles ? profiles[name] : null);
+function saveProfiles() { try { localStorage.setItem(PROFILE_STORE, JSON.stringify(profiles)); } catch (e) {} }
+// (a grade saved before profiles existed, or one whose profile has gone, becomes unsaved changes)
+if (grade.preset !== 'Custom' && !profileValues(grade.preset)) grade.preset = 'Custom';
+if (grade.preset === 'Custom' && !profileValues(grade.base)) grade.base = GRADE_DEFAULT;
+if (grade.draft && !(grade.draft.values && profileValues(grade.draft.base))) grade.draft = null;
 
 function hexToLinear(hex, v) {
   const n = parseInt(hex.slice(1), 16);
@@ -2827,9 +2851,7 @@ function buildPanel() {
   const foot = (note, buttons) => `<div class="foot"><span>${note}</span><span class="btns">${buttons}</span></div>`;
   const pane = {};
 
-  let h = '<div class="presets" role="group" aria-label="Presets">';
-  for (const name in GRADE_PRESETS) h += `<button type="button" data-preset="${name}">${name}</button>`;
-  h += '</div>';
+  let h = '<div class="presets" role="group" aria-label="Profiles" id="g-presets"></div>';
   for (const c of GRADE_CONTROLS) {
     if (c.sec) { h += `<div class="sec">${c.sec}</div>`; continue; }
     const id = 'g-' + c.key;
@@ -2840,7 +2862,10 @@ function buildPanel() {
     if (c.ends) h += `<div class="ends"><span>${c.ends[0]}</span><span>${c.ends[1]}</span></div>`;
     h += '</div>';
   }
-  h += '<div class="foot"><span id="g-name"></span><button type="button" id="g-reset">Reset</button></div>';
+  h += '<div class="foot"><span id="g-name"></span><span class="btns" id="g-btns"></span></div>';
+  h += '<div class="saverow" id="g-save" hidden><input type="text" id="g-save-name" maxlength="24" placeholder="Name this profile" aria-label="Profile name" autocomplete="off" spellcheck="false">'
+     + '<button type="button" id="g-save-ok">Save</button><button type="button" id="g-save-cancel">Cancel</button></div>';
+  h += '<div class="savemsg" id="g-save-msg" role="status"></div>';
   pane.colour = h;
 
   pane.weather = `<div class="sec">Lightning nearby</div>
@@ -2929,8 +2954,73 @@ function syncPanel() {
     document.getElementById('g-' + c.key + '-v').textContent = fmt(c, grade[c.key]);
     if (c.color) document.getElementById('g-' + c.color).value = grade[c.color];
   }
-  gradeBody.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === grade.preset)));
-  document.getElementById('g-name').textContent = grade.preset === 'Custom' ? 'Custom grade' : grade.preset;
+  renderProfiles();
+}
+const escHTML = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+let deleteArmed = 0;   // time the Delete button was first clicked (it needs a second click)
+function renderProfiles() {
+  const unsaved = grade.preset === 'Custom';
+  let h = '';
+  for (const n of Object.keys(GRADE_PRESETS)) h += `<button type="button" data-preset="${escHTML(n)}" aria-pressed="${grade.preset === n}">${escHTML(n)}</button>`;
+  for (const n in profiles) h += `<button type="button" class="mine" data-preset="${escHTML(n)}" aria-pressed="${grade.preset === n}" title="Your profile">${escHTML(n)}</button>`;
+  if (unsaved || grade.draft) h += `<button type="button" class="draft" data-draft="1" aria-pressed="${unsaved}" title="Unsaved changes">Custom</button>`;
+  document.getElementById('g-presets').innerHTML = h;
+  const mine = !unsaved && !isBuiltIn(grade.preset);
+  document.getElementById('g-name').textContent = unsaved ? 'Unsaved, from ' + grade.base : mine ? 'Your profile' : 'Built-in profile';
+  let btns = '';
+  if (unsaved) {
+    btns += '<button type="button" id="g-revert" title="Back to ' + escHTML(grade.base) + '">Revert</button>';
+    if (!isBuiltIn(grade.base)) btns += '<button type="button" id="g-update" title="Save these changes to ' + escHTML(grade.base) + '">Save</button>';
+    btns += '<button type="button" id="g-saveas">Save as…</button>';
+  } else if (mine) {
+    btns += `<button type="button" id="g-delete">${deleteArmed && performance.now() - deleteArmed < 3000 ? 'Delete?' : 'Delete'}</button>`;
+  }
+  document.getElementById('g-btns').innerHTML = btns;
+}
+function setSaveMsg(t) { document.getElementById('g-save-msg').textContent = t || ''; }
+function showSaveRow(on) {
+  const r = document.getElementById('g-save'), inp = document.getElementById('g-save-name');
+  r.hidden = !on;
+  setSaveMsg('');
+  if (on) {
+    inp.value = !isBuiltIn(grade.base) ? grade.base : '';
+    inp.focus(); inp.select();
+    checkSaveName();
+  }
+}
+// what Save will do with the name typed so far
+function checkSaveName() {
+  const n = document.getElementById('g-save-name').value.trim(), ok = document.getElementById('g-save-ok');
+  if (!n) { ok.disabled = true; ok.textContent = 'Save'; setSaveMsg(''); return; }
+  if (isBuiltIn(n) || n === 'Custom') { ok.disabled = true; ok.textContent = 'Save'; setSaveMsg('That name belongs to a built-in profile.'); return; }
+  ok.disabled = false;
+  const exists = profileValues(n) !== null;
+  ok.textContent = exists ? 'Replace' : 'Save';
+  setSaveMsg(exists ? 'You already have a profile called ' + n + '. Replace it?' : '');
+}
+function saveAs() {
+  const n = document.getElementById('g-save-name').value.trim();
+  if (!n || isBuiltIn(n) || n === 'Custom') return;
+  profiles[n] = gradeValues(grade);
+  saveProfiles();
+  grade.preset = n; delete grade.base; grade.draft = null;
+  showSaveRow(false);
+  syncPanel(); applyGrade();
+}
+function selectProfile(name) {
+  const v = profileValues(name);
+  if (!v) return;
+  // unsaved changes are kept behind the Custom button rather than lost
+  const draft = grade.preset === 'Custom' ? { base: grade.base, values: gradeValues(grade) } : grade.draft || null;
+  grade = Object.assign({ preset: name, draft }, gradeValues(v));
+  showSaveRow(false);
+  syncPanel(); applyGrade();
+}
+function restoreDraft() {
+  if (grade.preset === 'Custom' || !grade.draft) return;
+  const d = grade.draft;
+  grade = Object.assign({ preset: 'Custom', base: d.base, draft: null }, gradeValues(d.values));
+  syncPanel(); applyGrade();
 }
 buildPanel(); syncPanel(); applyGrade();
 gradeBody.addEventListener('keydown', e => {
@@ -2950,10 +3040,12 @@ gradeBody.addEventListener('input', e => {
   if (t.id.startsWith('p-')) { onAirInput(t); return; }
   if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
+  if (t.id === 'g-save-name') { checkSaveName(); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
-  grade.preset = 'Custom';
+  // the first change to a profile starts new unsaved changes from it (replacing any older ones)
+  if (grade.preset !== 'Custom') { grade.base = grade.preset; grade.preset = 'Custom'; grade.draft = null; }
   syncPanel(); applyGrade();
 });
 gradeBody.addEventListener('click', e => {
@@ -2966,10 +3058,35 @@ gradeBody.addEventListener('click', e => {
   if (b.id === 'p-now') { airNow(); return; }
   if (b.id === 'p-reset') { resetAir(); return; }
   if (b.id === 's-met-now') { launchMeteor(); return; }
-  const name = b.dataset.preset || (b.id === 'g-reset' ? (grade.preset in GRADE_PRESETS ? grade.preset : GRADE_DEFAULT) : null);
-  if (!name) return;
-  grade = Object.assign({ preset: name }, GRADE_PRESETS[name]);
-  syncPanel(); applyGrade();
+  if (b.dataset.preset) { selectProfile(b.dataset.preset); return; }
+  if (b.dataset.draft) { restoreDraft(); return; }
+  if (b.id === 'g-revert') {   // back to the profile the changes started from; they are dropped
+    grade = Object.assign({ preset: grade.base, draft: null }, gradeValues(profileValues(grade.base)));
+    showSaveRow(false); syncPanel(); applyGrade(); return;
+  }
+  if (b.id === 'g-update') {
+    profiles[grade.base] = gradeValues(grade); saveProfiles();
+    grade.preset = grade.base; delete grade.base;
+    syncPanel(); applyGrade(); return;
+  }
+  if (b.id === 'g-saveas') { showSaveRow(document.getElementById('g-save').hidden); return; }
+  if (b.id === 'g-save-ok') { saveAs(); return; }
+  if (b.id === 'g-save-cancel') { showSaveRow(false); return; }
+  if (b.id === 'g-delete') {
+    const now = performance.now();
+    if (!deleteArmed || now - deleteArmed > 3000) { deleteArmed = now; renderProfiles(); setTimeout(() => { deleteArmed = 0; renderProfiles(); }, 3000); return; }
+    deleteArmed = 0;
+    // the look stays, as unsaved changes from the default, so it can be saved again
+    delete profiles[grade.preset]; saveProfiles();
+    grade.preset = 'Custom'; grade.base = GRADE_DEFAULT;
+    if (grade.draft && !profileValues(grade.draft.base)) grade.draft = null;
+    syncPanel(); applyGrade(); return;
+  }
+});
+gradeBody.addEventListener('keydown', e => {
+  if (e.target.id !== 'g-save-name') return;
+  if (e.key === 'Enter') { saveAs(); e.preventDefault(); }
+  else if (e.key === 'Escape') { showSaveRow(false); e.preventDefault(); e.stopPropagation(); }
 });
 function setPanel(open) {
   gradeEl.classList.toggle('open', open);

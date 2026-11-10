@@ -121,7 +121,13 @@ The grade is applied in the final pass, after ACES tone mapping, so it costs not
 | **Deep Sea** | Saturated cyan-teal with deep shadows |
 | **Silver** | Nearly monochrome |
 
-Changing any control switches the panel's label to "Custom grade". **Reset** returns every grade control to the selected preset, or to Teal Night once you have customised the grade.
+Changing any control turns the grade into unsaved changes, shown as **Custom**, and the panel names the profile they started from. From there:
+
+- **Revert** drops the changes and returns to that profile.
+- **Save as…** names them and keeps them as your own profile, shown among the presets with a dashed outline. Built-in names are refused, and saving over one of your own names asks you to confirm.
+- **Save** appears when the changes started from one of your own profiles, and updates that profile.
+
+A saved profile only changes when you save to it, so picking a built-in preset and changing it never touches your own profiles. Unsaved changes aren't lost by picking another profile either: they wait behind the **Custom** button until you change a profile again. Your own profiles can be deleted, with a second click to confirm. Deleting the one in use keeps its look as unsaved changes, so it can still be saved again.
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -242,7 +248,8 @@ All settings are saved per browser in `localStorage`, under these keys:
 
 | Key | Holds |
 | --- | --- |
-| `moonlit-cloud-sea:grade:v1` | Colour grade and selected preset |
+| `moonlit-cloud-sea:grade:v1` | Colour grade, the profile in use and any unsaved changes |
+| `moonlit-cloud-sea:grade-profiles:v1` | Your own saved colour grade profiles |
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
