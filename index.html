@@ -151,6 +151,8 @@
    Scene constants (kept identical between JS and GLSL)
 --------------------------------------------------------------------------- */
 const MOON_DIR = new THREE.Vector3(-0.2528, 0.2079, -0.9448).normalize();
+// its default height and direction in degrees (the Sky panel can move it; see setMoonPos)
+const MOON_ALT0 = Math.asin(MOON_DIR.y) * 180 / Math.PI, MOON_AZ0 = Math.atan2(MOON_DIR.x, -MOON_DIR.z) * 180 / Math.PI;
 const MOON_R = 0.044;               // angular radius (rad) – a touch smaller than the photos
 const SPEED = 1.25;                 // world units / second
 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -286,6 +288,7 @@ void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
 
 const COMMON = `
+uniform vec3 uMoonTint, uMoonDiskTint;   // the moon's light, and the moon itself, after their path through the air (1 at the default height)
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec4 hash42(vec2 p){ vec4 p4 = fract(vec4(p.xyxy) * vec4(.1031, .1030, .0973, .1099)); p4 += dot(p4, p4.wzxy + 33.33); return fract((p4.xxyz + p4.yzzw) * p4.zywx); }
 vec3 hash33(vec3 p3){ p3 = fract(p3 * vec3(.1031, .1030, .0973)); p3 += dot(p3, p3.yxz + 33.33); return fract((p3.xxy + p3.yxx) * p3.zyx); }
@@ -308,10 +311,8 @@ vec3 skyBase(vec3 rd, vec3 m){
   col += vec3(0.34, 0.19, 0.09) * band * (0.03 + 0.97 * pow(az, 6.0)) * 0.20;
   col += vec3(0.10, 0.10, 0.12) * wide * pow(az, 3.0) * 0.08;
   float a = 2.0 * asin(clamp(length(rd - m) * 0.5, 0.0, 1.0));
-  col += vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-a * 2.4);
-  col += vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-a * 8.5);
-  col += vec3(1.00, 0.90, 0.74) * 0.1100 * exp(-a * 28.0);
-  col += vec3(1.00, 0.93, 0.80) * 0.4500 * exp(-a * 90.0);
+  col += (vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-a * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-a * 8.5)
+        + vec3(1.00, 0.90, 0.74) * 0.1100 * exp(-a * 28.0) + vec3(1.00, 0.93, 0.80) * 0.4500 * exp(-a * 90.0)) * uMoonDiskTint;
   return col;
 }
 `;
@@ -388,7 +389,7 @@ float moonLitSky(vec3 rd, vec3 m, float am){
 // where the narrow glow is still visible. skyBase's narrow glow also peaks at the centre of the
 // disc; over the dark part it is held at its strength at the limb instead (amD), so it does not
 // show there as a bright spot in the middle. At full moon all of this gives skyBase unchanged.
-vec3 moonNight(vec3 rd, vec3 m, float am, float litAt){
+vec3 moonNight(vec3 rd, vec3 m, float am, float litAt, out vec3 halo){   // halo: the moon's glow alone
   float haloK = mix(0.08, 1.0, uMoonL);
   float pa = uMoonPhase * 6.2831853;
   float surge = 0.4 + 0.6 * exp(-1.2 * abs(3.1415927 - pa));
@@ -399,9 +400,10 @@ vec3 moonNight(vec3 rd, vec3 m, float am, float litAt){
     gk = mix(moonGlowK(vec2(dot(rd, mr), dot(rd, mu)) / uMoonR), gk, smoothstep(0.22, 0.3, am));
   }
   gk *= surge;
-  vec3 haloW = vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-am * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-am * 8.5);
+  vec3 haloW = (vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-am * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-am * 8.5)) * uMoonDiskTint;
   float amD = mix(max(am, uMoonR), am, litAt);
-  vec3 h28 = vec3(1.00, 0.90, 0.74) * 0.1100, h90 = vec3(1.00, 0.93, 0.80) * 0.4500;
+  vec3 h28 = vec3(1.00, 0.90, 0.74) * 0.1100 * uMoonDiskTint, h90 = vec3(1.00, 0.93, 0.80) * 0.4500 * uMoonDiskTint;
+  halo = haloW * haloK + h28 * exp(-amD * 28.0) * gk.x + h90 * exp(-amD * 90.0) * gk.y;
   return skyBase(rd, m) - haloW * (1.0 - haloK)
        - h28 * (exp(-am * 28.0) - exp(-amD * 28.0) * gk.x)
        - h90 * (exp(-am * 90.0) - exp(-amD * 90.0) * gk.y);
@@ -622,6 +624,7 @@ precision highp float;
 precision highp sampler3D;
 uniform sampler3D uNoise;
 uniform vec3 uMoonDir;
+uniform float uMoonOnly;   // 1: only the shadow toward the moon (R), for a rebake after the moon moves
 varying vec2 vUv;
 ${COMMON}
 ${WORLD}
@@ -639,6 +642,7 @@ void main(){
     od += densLight(sceneSD(q)) * ds * exp(-tt * 0.02);   // far shadows fill in with scattered light
     tt += ds; ds = min(ds * 1.07, 3.0);
   }
+  if (uMoonOnly > 0.5){ gl_FragColor = vec4(1.0 - exp(-od * 0.25), 0.0, 0.0, 1.0); return; }
   float up = 0.0; ds = 0.3; tt = 0.0;
   for (int i = 0; i < 14; i++){
     vec3 q = p + vec3(0.0, tt + ds * 0.5, 0.0);
@@ -668,7 +672,7 @@ void main(){
 
 /* ---------------------------------------------------------------------------
    Terrain: flooded mountains below the deck. Baked once into tiling textures,
-   since the terrain never changes and the moon never moves:
+   since the terrain never changes (moving the moon rebakes TER_A's moonlight; see moonBakeStep):
      TER_H  R surface height (ground + tree canopy), G forest, B bare ground, A rock grain
      TER_A  R moonlight (N.L x soft shadow; shadow alone on water), G sky visibility, B forest
      TER_B  albedo (stored as its square root)
@@ -760,8 +764,9 @@ precision highp float;
 precision highp sampler3D;
 uniform sampler3D uNoise;
 uniform sampler2D uTerH;
+uniform sampler2D uTerAOld;   // mode 3: the TER_A being replaced, for the parts the moon does not change
 uniform vec3 uMoonDir;
-uniform float uMode;
+uniform float uMode;   // 0 TER_A, 1 TER_B, 2 TER_C, 3 TER_A's moonlight only (after the moon moves)
 varying vec2 vUv;
 ${COMMON}
 ${WORLD}
@@ -785,8 +790,8 @@ void main(){
   float e = TER_TEXEL;
   vec3 n = normalize(vec3(tH(xz - vec2(e, 0.0)) - tH(xz + vec2(e, 0.0)), 2.0 * e,
                           tH(xz - vec2(0.0, e)) - tH(xz + vec2(0.0, e))));
-  if (uMode < 0.5){
-    // soft shadow toward the (fixed) moon
+  if (uMode < 0.5 || uMode > 2.5){
+    // soft shadow toward the moon
     float sh = 1.0, s = 0.2;
     for (int i = 0; i < 56; i++){
       vec3 q = vec3(xz.x, y0, xz.y) + uMoonDir * s;
@@ -797,6 +802,7 @@ void main(){
     }
     sh = smoothstep(0.0, 1.0, clamp(sh, 0.0, 1.0));
     float ndl = water ? 1.0 : max(dot(n, uMoonDir), 0.0);
+    if (uMode > 2.5){ gl_FragColor = vec4(ndl * sh, textureLod(uTerAOld, gl_FragCoord.xy / ${TER_N}.0, 0.0).gba); return; }
     // sky visibility: how much of the sky the horizon leaves open, over 8 directions
     float vis = 0.0;
     for (int k = 0; k < 8; k++){
@@ -1037,7 +1043,8 @@ void main(){
   float backlit = smoothstep(0.35, 0.97, cosT);
   // (the fog takes the sky's colour, with the moon's glow fitted to the phase as in the sky)
   float amF = 2.0 * asin(clamp(length(rd - uMoonDir) * 0.5, 0.0, 1.0));
-  vec3 fogC = moonNight(rd, uMoonDir, amF, moonLitSky(rd, uMoonDir, amF)) * 0.94;
+  vec3 haloF;
+  vec3 fogC = moonNight(rd, uMoonDir, amF, moonLitSky(rd, uMoonDir, amF), haloF) * 0.94;
   const vec3 AIR_C = vec3(0.0060, 0.0112, 0.0245) * 0.94;   // the sky's plain horizon blue
 
   float jit = ign(gl_FragCoord.xy + mod(uFrame, 64.0) * 5.588238);
@@ -1052,7 +1059,7 @@ void main(){
   const float SIG = 4.0;
   const float MOON_I = 3.1;
   const float RAMP_K = 0.5;   // how strongly distant cloud edges soften (0 = not at all)
-  vec3 lightCol = mix(MOON_COOL, MOON_WARM, smoothstep(0.55, 0.985, cosT));
+  vec3 lightCol = mix(MOON_COOL, MOON_WARM, smoothstep(0.55, 0.985, cosT)) * uMoonTint;
 
   if (uNoClouds > 0.5) t = tMax + 1.0;   // debug view (?noclouds): the ground alone
   for (int i = 0; i < 300; i++){
@@ -1212,7 +1219,7 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
   float aC = texture(uNoise, vec3(pc.xz * F_A, 0.137)).b;
   float open = 1.0 - smoothstep(0.42, 0.52, coverageAt(pc.xz, aC));
   float lit = mix(0.12, 1.0, open) * uMoonL;   // (a thinner moon lights everything it reaches less)
-  const vec3 MOON_G = vec3(1.10, 1.22, 1.42);       // moonlight on the ground
+  vec3 MOON_G = vec3(1.10, 1.22, 1.42) * uMoonTint;   // moonlight on the ground
   vec3 SKY_G = vec3(0.0050, 0.0068, 0.0120) * uMoonA;   // what the night sky adds
   const vec3 LAMP_C = vec3(1.00, 0.44, 0.13);         // warm sodium-orange street lights
   vec3 alb = textureLod(uTerB, uv, lod).rgb;
@@ -1242,8 +1249,8 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
     // the reflected sky without the moon's bright halo (the glitter below is the moon's reflection)
     float am = 2.0 * asin(clamp(length(r - uMoonDir) * 0.5, 0.0, 1.0));
     // (and with the wider glow faded to the moon's phase, as in the sky itself)
-    vec3 skyR = skyBase(r, uMoonDir) - vec3(1.00, 0.90, 0.74) * 0.1100 * exp(-am * 28.0) - vec3(1.00, 0.93, 0.80) * 0.4500 * exp(-am * 90.0)
-              - (vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-am * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-am * 8.5)) * (0.92 - 0.92 * uMoonL);
+    vec3 skyR = skyBase(r, uMoonDir) - (vec3(1.00, 0.90, 0.74) * 0.1100 * exp(-am * 28.0) + vec3(1.00, 0.93, 0.80) * 0.4500 * exp(-am * 90.0)
+              + (vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-am * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-am * 8.5)) * (0.92 - 0.92 * uMoonL)) * uMoonDiskTint;
     vec3 refl = mix(skyR, vec3(0.0009, 0.0012, 0.0016), mtn);
     float wind = smoothstep(0.3, 0.75, texture(uNoise, vec3(po.xz * 0.011 + 0.3, 0.61)).b);
     float a2 = pow(mix(0.045, 0.14, wind), 2.0);
@@ -1255,7 +1262,7 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
     float depth = WATER_Y - (textureLod(uTerH, uv, lod).b * TER_RANGE + TER_LO);
     vec3 below = vec3(0.0010, 0.0017, 0.0026)
                + alb * (MOON_G * A.r * lit * 0.5 + SKY_G) * 0.4 * exp(-max(depth, 0.0) * 1.6);   // the bed shows in the shallows
-    col = below * (1.0 - fres) + refl * fres + MOON_WARM * 0.0035 * D * fh / cv * moonSeen;
+    col = below * (1.0 - fres) + refl * fres + MOON_WARM * uMoonDiskTint * 0.0035 * D * fh / cv * moonSeen;
     // a lake beside a lit town catches its warm glow (the lamps' light, blurred out)
     col += LAMP_C * uLamps * textureLod(uTerL, uv, lod + 3.0).x * 0.10 * (0.35 + fres);
   }
@@ -1302,7 +1309,7 @@ vec3 groundView(vec3 ro, vec3 rd, float cosT, out float tHit){
   }
   // the dim air between deck and ground
   float haze = 1.0 - exp(-(t - (Y_MIN - ro.y) / rd.y) * 0.0028);
-  vec3 hazeC = vec3(0.0030, 0.0052, 0.0115) + MOON_COOL * 0.010 * pow(max(cosT, 0.0), 6.0) * uMoonL;
+  vec3 hazeC = vec3(0.0030, 0.0052, 0.0115) + MOON_COOL * uMoonTint * 0.010 * pow(max(cosT, 0.0), 6.0) * uMoonL;
   vec3 glow = vec3(0.0);
   if (uFlash > 0.0){
     // a ground strike lights the land and water around it and the rainy air under the deck
@@ -1464,6 +1471,7 @@ uniform vec3 uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime, uFrame, uPixAng, uMoonR, uExposure, uMoonReady;
 uniform float uTwinkle, uStarLow;   // Sky panel: how much stars twinkle, how low they reach
 uniform float uEarth;   // Sky panel: how bright the earthshine on the moon's dark part is (1 as designed)
+uniform float uMoonClear;   // how clearly the moon's surface shows through the air (1 at the default height and above)
 uniform float uMoonPhase;   // 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter
 uniform float uMoonL, uMoonA;   // moon phase: strength of its direct light, and of the night sky's glow (1 at full)
 uniform vec3 uMetA, uMetB;   // a shooting star: where it starts and where it would end on the sky
@@ -1655,13 +1663,27 @@ vec3 moonDisk(vec3 rd, vec3 m){
   vec3 n = vec3(uv, sqrt(max(1.0 - r * r, 0.0)));
   // the Moon's actual near side (NASA LRO albedo map), north up, as seen from Earth
   float lon = atan(n.x, n.z), lat = asin(clamp(n.y, -1.0, 1.0));
-  float m0 = texture2D(uMoonMap, vec2(0.5 + lon / 6.2831853, 0.5 + lat / 3.1415927)).r;
+  vec2 muv = vec2(0.5 + lon / 6.2831853, 0.5 + lat / 3.1415927);
+  float m0 = texture2D(uMoonMap, muv).r;
+  // low down, the air in front blurs the surface a little (seen through more turbulent air)
+  if (uMoonClear < 1.0){
+    float br = (1.0 - uMoonClear) * 0.012;
+    m0 = (m0 * 2.0 + texture2D(uMoonMap, muv + vec2(br, 0.0)).r + texture2D(uMoonMap, muv - vec2(br, 0.0)).r
+          + texture2D(uMoonMap, muv + vec2(0.0, br)).r + texture2D(uMoonMap, muv - vec2(0.0, br)).r) / 6.0;
+  }
   float alb = mix(0.85, pow(m0, 1.2) * 1.75, uMoonReady);
   float limb = 0.88 + 0.12 * pow(n.z, 0.6);
   vec3 tint = mix(vec3(1.00, 0.82, 0.60), vec3(1.0, 0.93, 0.80), n.z);
+  // and veils it with light scattered in front, flattening the maria, the highlands and the
+  // darker, warmer edge toward their average
+  if (uMoonClear < 1.0){
+    alb = mix(0.85, alb, uMoonClear);
+    limb = mix(0.96, limb, uMoonClear);
+    tint = mix(vec3(1.0, 0.90, 0.74), tint, uMoonClear);
+  }
   // the dark part shows only a faint, cool earthshine, strongest when the moon is thin
   vec3 earth = vec3(0.55, 0.68, 1.0) * alb * 0.004 * (1.0 - 0.7 * uMoonL) * uEarth;
-  return mix(earth, tint * alb * limb * 1.3, moonLit(n, aa)) * edge;
+  return mix(earth, tint * alb * limb * 1.3, moonLit(n, aa)) * edge * uMoonDiskTint;
 }
 
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
@@ -1696,8 +1718,12 @@ void main(){
   // the night sky with the moon's glow fitted to the phase (moonNight), hidden behind the lit part
   // of the disc, as before
   float litAt = moonLitSky(rd, m, am);
-  vec3 night = moonNight(rd, m, am, litAt);
-  vec3 sky = night * (1.0 - 0.82 * diskMask * litAt) + st + moonDisk(rd, m);
+  vec3 halo;
+  vec3 night = moonNight(rd, m, am, litAt, halo);
+  vec3 disk = moonDisk(rd, m);
+  vec3 sky = night * (1.0 - 0.82 * diskMask * litAt) + st + disk;
+  // the moon's own light here (its disc and glow), for the grade below
+  vec3 moonPart = (halo * (1.0 - 0.82 * diskMask * litAt) + disk) * c.a;
 
   vec3 col = c.rgb + sky * c.a;
   // lightning: the bolt itself (already hidden by the clouds in front of it), and a
@@ -1715,18 +1741,24 @@ void main(){
     col += uFarCol.rgb * uFar.w * g * (c.a + uFarCol.w * (2.5 * c.a * (1.0 - c.a) + 0.06));
   }
   float rays = texture2D(tRays, vUv).r;
-  col += rays * vec3(0.74, 0.80, 0.95) * 0.6 * uRays * uMoonL * (1.0 - 0.8 * diskMask * litAt * c.a);
+  col += rays * vec3(0.74, 0.80, 0.95) * uMoonDiskTint * 0.6 * uRays * uMoonL * (1.0 - 0.8 * diskMask * litAt * c.a);
 
   // ---- colour grade (all of it driven from the panel) ----
   const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
-  col *= uExposure * uBalance;                       // exposure + white balance, in linear light
+  // A low moon turns warm, and the grade's colour cast (Teal Night lifts green over red, and its
+  // teal shadow toning all but halves red in a dim glow) would turn that gold and red to green.
+  // So where the light is the moon's own, the cast is relaxed, by the moon's share of the light
+  // and by how warm it is. At the default height the moon is white and this is exactly 0.
+  float warmM = clamp((1.0 - uMoonTint.b / max(uMoonTint.r, 1e-4)) * 2.0, 0.0, 1.0);
+  float prot = warmM > 0.0 ? warmM * clamp(dot(moonPart, LW) / max(dot(col, LW), 1e-5), 0.0, 1.0) : 0.0;
+  col *= uExposure * mix(uBalance, vec3(1.0), prot);   // exposure + white balance, in linear light
   col = aces(col);
   float lum = dot(col, LW);
   vec3 sT = uShadowTint / max(dot(uShadowTint, LW), 1e-3);
   vec3 hT = uHighTint / max(dot(uHighTint, LW), 1e-3);
-  col *= mix(vec3(1.0), sT, (1.0 - smoothstep(0.0, 0.5, lum)) * uShadowAmt);   // split toning
-  col *= mix(vec3(1.0), hT, smoothstep(0.3, 1.0, lum) * uHighAmt);
-  col += uShadowTint * uLift * 0.012 * (1.0 - lum);  // tinted night glow in the blacks
+  col *= mix(vec3(1.0), sT, (1.0 - smoothstep(0.0, 0.5, lum)) * uShadowAmt * (1.0 - prot));   // split toning
+  col *= mix(vec3(1.0), hT, smoothstep(0.3, 1.0, lum) * uHighAmt * (1.0 - prot));
+  col += uShadowTint * uLift * 0.012 * (1.0 - lum) * (1.0 - prot);  // tinted night glow in the blacks
   float l2 = dot(col, LW);
   col = max(mix(vec3(l2), col, uSat), 0.0);
   col = pow(col, vec3(uContrast));
@@ -1880,7 +1912,7 @@ const lightU = {
   uGround: { value: new THREE.Vector3() }, uGroundI: { value: 0 }
 };
 // the moon's phase, shared by the cloud, ground and composite passes (see setMoonPhase)
-const moonU = { uMoonPhase: { value: 0.5 }, uMoonL: { value: 1 }, uMoonA: { value: 1 } };
+const moonU = { uMoonPhase: { value: 0.5 }, uMoonL: { value: 1 }, uMoonA: { value: 1 }, uMoonTint: { value: new THREE.Vector3(1, 1, 1) }, uMoonDiskTint: { value: new THREE.Vector3(1, 1, 1) } };
 // terrain bake targets (see TERRAIN_COMMON); height in half float where possible
 function makeTerRT(type) {
   const rt = new THREE.WebGLRenderTarget(TER_N, TER_N, {
@@ -1921,7 +1953,7 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   tCloud: { value: null }, tRays: { value: null }, uNoise: { value: noiseTex },
   uCloudTexel: { value: new THREE.Vector2() }, uRes: { value: new THREE.Vector2() },
   uPixAng: { value: 0.001 }, uMoonR: { value: MOON_R }, uExposure: { value: 1.12 },
-  uTwinkle: { value: 1 }, uStarLow: { value: 0.035 }, uEarth: { value: 1 },
+  uTwinkle: { value: 1 }, uStarLow: { value: 0.035 }, uEarth: { value: 1 }, uMoonClear: { value: 1 },
   uMetA: { value: new THREE.Vector3(0, 0, 1) }, uMetB: { value: new THREE.Vector3(0, 0.1, 1) }, uMet: { value: new THREE.Vector4(0, 0, 0, 0) },
   uMoonMap: { value: null }, uMoonReady: { value: 0 },
   uBalance: { value: new THREE.Vector3(1, 1, 1) }, uShadowTint: { value: new THREE.Vector3(1, 1, 1) },
@@ -2032,7 +2064,7 @@ const status = document.getElementById('status');
    Light bake: the moon and the clouds never move, so the light reaching every
    point of the world tile is computed once, in small chunks across a few frames.
 --------------------------------------------------------------------------- */
-const bakePass = makePass(BAKE_FRAG, { uNoise: { value: noiseTex }, uMoonDir: { value: MOON_DIR } });
+const bakePass = makePass(BAKE_FRAG, { uNoise: { value: noiseTex }, uMoonDir: { value: MOON_DIR }, uMoonOnly: { value: 0 } });
 const BAKE_W = BAKE_N * BAKE_COLS, BAKE_H = BAKE_N * BAKE_ROWS;
 const bakeRT = new THREE.WebGLRenderTarget(BAKE_W, BAKE_H, {
   type: THREE.UnsignedByteType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
@@ -2062,14 +2094,14 @@ function bakeStep() {
     }
   }
   bakeTex.needsUpdate = true;
-  bakeRT.dispose(); bakePass.mat.dispose();
+  bakeRT.dispose();   // (bakePass is kept: moving the moon rebakes its shadow)
   bakeChunk = Infinity;
 }
 // Terrain bake: the height in 4 strips, then moonlight, colour and horizons in strips
 // (the lighting pass is the heavy one), then a CPU copy of the heights for lightning.
 const terHPass = makePass(TER_H_FRAG, { uNoise: { value: noiseTex } });
 const terTPass = makePass(TER_T_FRAG, { uNoise: { value: noiseTex }, uTerH: { value: terH.texture } });
-const terLPass = makePass(TER_L_FRAG, { uNoise: { value: noiseTex }, uTerH: { value: terH.texture }, uMoonDir: { value: MOON_DIR }, uMode: { value: 0 } });
+const terLPass = makePass(TER_L_FRAG, { uNoise: { value: noiseTex }, uTerH: { value: terH.texture }, uTerAOld: { value: null }, uMoonDir: { value: MOON_DIR }, uMode: { value: 0 } });
 const TER_JOBS = [];
 for (let s = 0; s < 4; s++) TER_JOBS.push({ rt: terH, pass: terHPass, s, n: 4 });
 for (let s = 0; s < 8; s++) TER_JOBS.push({ rt: terA, pass: terLPass, mode: 0, s, n: 8 });
@@ -2101,8 +2133,59 @@ function terrainStep() {
   }
   groundPass.u.uTerTop.value = top + 0.3;
   placeMasts();
-  terHPass.mat.dispose(); terLPass.mat.dispose();
+  terHPass.mat.dispose();   // (terLPass is kept: moving the moon rebakes the terrain's moonlight)
   return true;
+}
+// Moving the moon: its shadow in the cloud bake (R) and the terrain's moonlight (TER_A's R) are
+// rebaked in the background, a few chunks a frame, and each is swapped in whole when it is done,
+// so the view never shows half of one. A move during a rebake starts it over.
+const moonBake = { want: false, chunk: -1, ter: -1, buf: null, cur: terA, spare: null };
+function requestMoonBake() { moonBake.want = true; }
+function moonBakeStep() {
+  const mb = moonBake;
+  if (mb.want) { mb.want = false; mb.chunk = 0; mb.ter = -1; }
+  if (mb.chunk >= 0) {
+    bakePass.u.uMoonOnly.value = 1;
+    for (let n = 0; n < 4 && mb.chunk < BAKE_CHUNKS; n++, mb.chunk++) {
+      const row = Math.floor(mb.chunk / 4), col = (mb.chunk % 4) * 2;
+      bakeRT.scissor.set(col * BAKE_N, row * BAKE_N, BAKE_N * 2, BAKE_N);
+      bakeRT.scissorTest = true;
+      renderer.setRenderTarget(bakeRT);
+      renderer.render(bakePass.scene, quadCam);
+    }
+    bakePass.u.uMoonOnly.value = 0;
+    renderer.setRenderTarget(null);
+    if (mb.chunk < BAKE_CHUNKS) return;
+    if (!mb.buf) mb.buf = new Uint8Array(BAKE_W * BAKE_H * 4);
+    const buf = mb.buf, out = bakeTex.image.data;
+    renderer.readRenderTargetPixels(bakeRT, 0, 0, BAKE_W, BAKE_H, buf);
+    bakeRT.dispose();
+    for (let k = 0; k < BAKE_NY; k++) {
+      const tx = k % BAKE_COLS, ty = Math.floor(k / BAKE_COLS);
+      for (let j = 0; j < BAKE_N; j++) {
+        let src = ((ty * BAKE_N + j) * BAKE_W + tx * BAKE_N) * 4, dst = (k * BAKE_N + j) * BAKE_N * 4;
+        for (let i = 0; i < BAKE_N; i++, src += 4, dst += 4) out[dst] = buf[src];   // R only
+      }
+    }
+    bakeTex.needsUpdate = true;
+    mb.chunk = -1; mb.ter = 0;
+    return;
+  }
+  if (mb.ter >= 0) {
+    if (!mb.spare) mb.spare = makeTerRT(THREE.UnsignedByteType);
+    const h = TER_N / 8;
+    terLPass.u.uMode.value = 3;
+    terLPass.u.uTerAOld.value = mb.cur.texture;
+    mb.spare.scissor.set(0, mb.ter * h, TER_N, h);
+    mb.spare.scissorTest = true;
+    renderer.setRenderTarget(mb.spare);
+    renderer.render(terLPass.scene, quadCam);
+    renderer.setRenderTarget(null);
+    if (++mb.ter < 8) return;
+    groundPass.u.uTerA.value = mb.spare.texture;
+    const t = mb.cur; mb.cur = mb.spare; mb.spare = t;
+    mb.ter = -1;
+  }
 }
 // Radio masts on a few of the highest summits, well apart: find the peaks (blocks of the
 // height map that are the highest for ~30 units around), then take the tallest few.
@@ -2651,6 +2734,7 @@ function loop(now) {
     else if (terrainStep()) { baked = true; status.classList.remove('on'); }
     last = now; requestAnimationFrame(loop); return;
   }
+  moonBakeStep();
   const raw = Math.max(0, (now - last) / 1000);
   last = now;
   const dt = Math.min(raw, 0.1);
@@ -2780,6 +2864,8 @@ function buildPanel() {
   pane.sky = `<div class="sec">Moon</div>
     ${row('s-phase', 'Phase', 0, 1, 0.005, 'Waxing', 'Waning')}
     ${row('s-earth', 'Earthshine', 0, 4, 0.05, 'None', 'Bright')}
+    ${row('s-alt', 'Height', 1, 75, 0.5, 'Horizon', 'High')}
+    ${row('s-az', 'Direction', -180, 180, 1, 'Left', 'Right')}
     <div class="sec">Stars</div>
     ${row('s-twinkle', 'Twinkle', 0, 2, 0.05, 'Steady', 'Strong')}
     ${row('s-low', 'Stars reach down to', 0, 0.35, 0.005, 'Horizon', 'Higher')}
@@ -2862,7 +2948,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id.startsWith('d-')) { onFarInput(t); return; }
   if (t.id.startsWith('p-')) { onAirInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
@@ -3188,7 +3274,7 @@ air.next = clock + 90 + Math.random() * 150;     // the first one comes within a
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 0.85 };
+let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 0.85, alt: MOON_ALT0, az: MOON_AZ0 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
@@ -3197,10 +3283,56 @@ const sMet = document.getElementById('s-meteors'), sMetV = document.getElementBy
 const sPhase = document.getElementById('s-phase'), sPhaseV = document.getElementById('s-phase-v');
 const sEarth = document.getElementById('s-earth'), sEarthV = document.getElementById('s-earth-v');
 const sGlow = document.getElementById('s-glow'), sGlowV = document.getElementById('s-glow-v');
+const sAlt = document.getElementById('s-alt'), sAltV = document.getElementById('s-alt-v');
+const sAz = document.getElementById('s-az'), sAzV = document.getElementById('s-az-v');
 // The moon's phase, 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter. A thinner moon
 // lights the clouds and ground less: its direct light falls off faster than the lit fraction
 // (the surface itself is dimmer away from full), and the night sky's glow, which is mostly
 // scattered moonlight, falls to about half. Town lights, beacons and lightning are unchanged.
+// The moon's position: height above the horizon and direction (degrees; 0 straight ahead along
+// the flight, negative to the left). Moving it moves the one MOON_DIR every pass reads, and its
+// shadows are rebaked (requestMoonBake). Near the horizon its light crosses far more air, which
+// takes out blue first, then green. Its colour follows MOON_HUES: a touch bluish high up, exactly
+// white at the default height (so it looks as it always has there), then warm, gold, orange and
+// a dusky red at the horizon, close to the physical colours (the composite keeps the night
+// grade's colour cast off the warm moon, which would otherwise turn its gold green). Its
+// brightness follows the light let through (Rayleigh plus haze over the air mass at that height,
+// Kasten and Young, relative to the default height; halved above it): the moon itself as its
+// 0.75 power, so it dims steeply toward the horizon, and the light it casts as its 0.3 power, so
+// the scene stays lit and its exposure does not swing.
+const MOON_HUES = [   // height (degrees), then the colour, before it is scaled to the brightness
+  [1.0, 1.00, 0.34, 0.16], [1.5, 1.00, 0.46, 0.20], [3.0, 1.00, 0.64, 0.32], [5.0, 1.00, 0.78, 0.50],
+  [8.0, 1.00, 0.90, 0.74], [MOON_ALT0, 1, 1, 1], [30.0, 0.96, 1.00, 1.06], [75.0, 0.93, 0.99, 1.10]
+];
+const MOON_TAU = [0.149, 0.194, 0.309];   // extinction per air mass: red, green, blue
+function airMass(altDeg) { const h = Math.max(altDeg, 0); return 1 / (Math.sin(h * Math.PI / 180) + 0.50572 * Math.pow(h + 6.07995, -1.6364)); }
+const AIR0 = airMass(MOON_ALT0);
+let moonMoveTimer = 0;
+function setMoonPos(altDeg, azDeg) {
+  const a = altDeg * Math.PI / 180, z = azDeg * Math.PI / 180;
+  MOON_DIR.set(Math.cos(a) * Math.sin(z), Math.sin(a), -Math.cos(a) * Math.cos(z));
+  // brightness: how much of the light gets through, against the default height
+  let d = airMass(altDeg) - AIR0;
+  if (d < 0) d *= 0.5;
+  const t = MOON_TAU.map(k => Math.exp(-k * d));
+  const through = 0.2126 * t[0] + 0.7152 * t[1] + 0.0722 * t[2];
+  // colour: between the two MOON_HUES around this height, at unit luminance
+  let i = 1;
+  while (i < MOON_HUES.length - 1 && MOON_HUES[i][0] < altDeg) i++;
+  const A = MOON_HUES[i - 1], B = MOON_HUES[i];
+  const f = Math.min(Math.max((altDeg - A[0]) / (B[0] - A[0]), 0), 1);
+  const c = [1, 2, 3].map(k => A[k] + (B[k] - A[k]) * f);
+  const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  // the moon itself (its disc, its glow, the light shafts beside it, its reflection) dims steeply; the light it casts on the
+  // clouds and ground dims gently, so a low moon still lights the scene
+  const gd = Math.pow(through, 0.75) / l, gl = Math.pow(through, 0.3) / l;
+  moonU.uMoonDiskTint.value.set(c[0] * gd, c[1] * gd, c[2] * gd);
+  // the air in front also lowers the contrast of its surface: 1 at the default height and above,
+  // about 0.55 at 3.5 degrees and 0.35 at 1 degree
+  const dAir = airMass(altDeg) - AIR0;
+  compPass.u.uMoonClear.value = dAir > 0 ? 0.3 + 0.7 * Math.exp(-0.12 * dAir) : 1;
+  moonU.uMoonTint.value.set(c[0] * gl, c[1] * gl, c[2] * gl);
+}
 const MOON_PHASES = ['New moon', 'Waxing crescent', 'First quarter', 'Waxing gibbous', 'Full moon', 'Waning gibbous', 'Last quarter', 'Waning crescent'];
 function setMoonPhase(p) {
   const lit = 0.5 - 0.5 * Math.cos(p * 2 * Math.PI);   // fraction of the disc lit
@@ -3234,6 +3366,13 @@ function syncSky() {
   sEarth.value = sky.earth;
   sEarthV.textContent = sky.earth === 0 ? 'off' : '×' + (+sky.earth).toFixed(2);
   compPass.u.uEarth.value = sky.earth;
+  if (!(sky.alt >= 1 && sky.alt <= 75)) sky.alt = MOON_ALT0;
+  if (!(sky.az >= -180 && sky.az <= 180)) sky.az = MOON_AZ0;
+  sAlt.value = sky.alt; sAz.value = sky.az;
+  sAltV.textContent = (+sky.alt).toFixed(1) + '°';
+  const azR = Math.round(sky.az);
+  sAzV.textContent = azR === 0 ? 'ahead' : Math.abs(azR) === 180 ? 'behind' : Math.abs(azR) + '° ' + (azR < 0 ? 'left' : 'right');
+  setMoonPos(+sky.alt, +sky.az);
 }
 function onSkyInput(t) {
   if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value);
@@ -3241,6 +3380,14 @@ function onSkyInput(t) {
   else if (t.id === 's-phase') sky.phase = parseFloat(t.value);
   else if (t.id === 's-earth') sky.earth = parseFloat(t.value);
   else if (t.id === 's-glow') sky.glow = parseFloat(t.value);
+  else if (t.id === 's-alt' || t.id === 's-az') {
+    if (t.id === 's-alt') sky.alt = parseFloat(t.value); else sky.az = parseFloat(t.value);
+    // back on the default's slider step: exactly the default, so it looks exactly as it did
+    if (Math.abs(sky.alt - MOON_ALT0) < 0.26) sky.alt = MOON_ALT0;
+    if (Math.abs(sky.az - MOON_AZ0) < 0.51) sky.az = MOON_AZ0;
+    // the moon moves at once; its shadows are rebaked once the slider has been still a moment
+    clearTimeout(moonMoveTimer); moonMoveTimer = setTimeout(requestMoonBake, 300);
+  }
   else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
