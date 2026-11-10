@@ -106,7 +106,9 @@
   #grade .presets button:hover { border-color: var(--accent); }
   #grade .presets button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #062421; }
   #grade .presets button.mine { border-style: dashed; }   /* the viewer's own saved profiles */
-  #grade .presets button.draft { font-style: italic; }   /* unsaved changes */
+  #grade .presets button.draft { font-style: italic; }   /* the unsaved scene */
+  #grade .presets button.add { padding: 5px 10px; }
+  #grade .about { font-size: 11.5px; line-height: 1.45; color: var(--panel-muted); margin: 2px 0 4px; }
   #grade .saverow { display: flex; gap: 6px; margin-top: 8px; }
   #grade .saverow input { flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--panel-fg); background: rgba(0, 0, 0, 0.25); border: 1px solid var(--panel-line); border-radius: 8px; padding: 5px 8px; }
   #grade .saverow button { font: inherit; color: var(--panel-fg); background: transparent; border: 1px solid var(--panel-line); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
@@ -2774,7 +2776,11 @@ const GRADE_PRESETS = {
   'Moonlit Blue':{ exposure: 1.12, temp: -0.10, tint: 0.00, sat: 1.00, contrast: 1.00, shadowAmt: 0.35, shadow: '#3b5c9c', highAmt: 0.15, high: '#fff0dc', lift: 0.30, rays: 1.0, vignette: 0.38, grain: 0.007 },
   'Golden Moon': { exposure: 1.15, temp: -0.10, tint: 0.05, sat: 1.00, contrast: 1.05, shadowAmt: 0.28, shadow: '#3d5a86', highAmt: 0.45, high: '#ffd8a0', lift: 0.30, rays: 1.2, vignette: 0.40, grain: 0.007 },
   'Deep Sea':    { exposure: 1.05, temp: -0.60, tint: 0.50, sat: 1.25, contrast: 1.10, shadowAmt: 0.70, shadow: '#006a73', highAmt: 0.35, high: '#a3f3e4', lift: 0.95, rays: 0.9, vignette: 0.45, grain: 0.008 },
-  'Silver':      { exposure: 1.20, temp: -0.05, tint: 0.00, sat: 0.25, contrast: 1.10, shadowAmt: 0.20, shadow: '#6b7a8c', highAmt: 0.00, high: '#ffffff', lift: 0.15, rays: 1.0, vignette: 0.40, grain: 0.009 }
+  'Silver':      { exposure: 1.20, temp: -0.05, tint: 0.00, sat: 0.25, contrast: 1.10, shadowAmt: 0.20, shadow: '#6b7a8c', highAmt: 0.00, high: '#ffffff', lift: 0.15, rays: 1.0, vignette: 0.40, grain: 0.009 },
+  // for a moon on the horizon: blue shadows and warm highlights, no green, so its reds stay clean
+  'Ember':       { exposure: 1.18, temp: 0.00, tint: 0.04, sat: 1.05, contrast: 1.05, shadowAmt: 0.35, shadow: '#21485e', highAmt: 0.30, high: '#ffc89a', lift: 0.30, rays: 1.0, vignette: 0.42, grain: 0.007 },
+  // for a moonless night: cool shadows, with the towns' orange glow kept warm
+  'Sodium':      { exposure: 1.25, temp: -0.05, tint: 0.06, sat: 1.05, contrast: 1.05, shadowAmt: 0.30, shadow: '#1f4a5c', highAmt: 0.20, high: '#ffd2a8', lift: 0.35, rays: 1.0, vignette: 0.40, grain: 0.007 }
 };
 const GRADE_DEFAULT = 'Teal Night';
 const GRADE_CONTROLS = [
@@ -2793,27 +2799,49 @@ const GRADE_CONTROLS = [
   { key: 'vignette', label: 'Vignette', min: 0, max: 0.8, step: 0.01 },
   { key: 'grain', label: 'Grain', min: 0, max: 0.03, step: 0.001 }
 ];
+// The grade in use. Each scene keeps its own (see Scenes); this is the active scene's, with
+// grade.preset naming the library profile it came from and grade.changed set once it differs
+// from that profile. (GRADE_STORE held the grade before there were scenes; it is read once, to
+// carry it over.)
 const GRADE_STORE = 'moonlit-cloud-sea:grade:v1';
-let grade = null;
-try { grade = JSON.parse(localStorage.getItem(GRADE_STORE) || 'null'); } catch (e) { grade = null; }
-if (!grade || typeof grade !== 'object') grade = Object.assign({ preset: GRADE_DEFAULT }, GRADE_PRESETS[GRADE_DEFAULT]);
-for (const k in GRADE_PRESETS[GRADE_DEFAULT]) if (grade[k] === undefined) grade[k] = GRADE_PRESETS[GRADE_DEFAULT][k];
-// The viewer's own saved profiles, by name. grade.preset is the profile in use: a built-in one,
-// one of these, or 'Custom' for unsaved changes, which remember the profile they started from
-// (grade.base) so Revert can go back to it. Unsaved changes left by picking another profile wait
-// in grade.draft, behind the Custom button. A saved profile only ever changes on Save.
+let oldGrade = null;
+try { oldGrade = JSON.parse(localStorage.getItem(GRADE_STORE) || 'null'); } catch (e) { oldGrade = null; }
+// The grade library: the built-in profiles and the viewer's own, by name. A saved profile only
+// ever changes on Save.
 const PROFILE_STORE = 'moonlit-cloud-sea:grade-profiles:v1';
 const GRADE_KEYS = Object.keys(GRADE_PRESETS[GRADE_DEFAULT]);
 const gradeValues = src => { const v = {}; for (const k of GRADE_KEYS) v[k] = src && src[k] !== undefined ? src[k] : GRADE_PRESETS[GRADE_DEFAULT][k]; return v; };
+const sameGrade = (a, b) => !!a && !!b && GRADE_KEYS.every(k => a[k] === b[k]);
 let profiles = Object.create(null);   // (no inherited names, so any name the viewer types is safe)
 try { const p = JSON.parse(localStorage.getItem(PROFILE_STORE) || 'null'); if (p && typeof p === 'object') for (const n in p) profiles[n] = gradeValues(p[n]); } catch (e) {}
 const isBuiltIn = name => Object.prototype.hasOwnProperty.call(GRADE_PRESETS, name);
 const profileValues = name => isBuiltIn(name) ? GRADE_PRESETS[name] : (name in profiles ? profiles[name] : null);
 function saveProfiles() { try { localStorage.setItem(PROFILE_STORE, JSON.stringify(profiles)); } catch (e) {} }
-// (a grade saved before profiles existed, or one whose profile has gone, becomes unsaved changes)
-if (grade.preset !== 'Custom' && !profileValues(grade.preset)) grade.preset = 'Custom';
-if (grade.preset === 'Custom' && !profileValues(grade.base)) grade.base = GRADE_DEFAULT;
-if (grade.draft && !(grade.draft.values && profileValues(grade.draft.base))) grade.draft = null;
+let grade = Object.assign({ preset: GRADE_DEFAULT, changed: false }, gradeValues(GRADE_PRESETS[GRADE_DEFAULT]));
+
+// Scenes: the look of a moment. Each sets the moon (phase, height, direction, earthshine), the
+// town lights and their glow on the clouds, and starts from a grade from the library chosen for
+// it. The built-in scenes never change: changing any of their settings carries the scene into one
+// unsaved scene (shown as Custom), which Keep turns into a scene of the viewer's own; a kept scene
+// is never overwritten by changes elsewhere. A scene's grade is its own, though: changing the
+// grade in a scene changes it for that scene alone, and Revert returns a built-in scene to the
+// grade it came with.
+const SCENE_KEYS = ['phase', 'alt', 'az', 'earth', 'lamps', 'glow'];
+const SCENES = [
+  { id: 'moonlit', name: 'Moonlit Night', grade: 'Teal Night', about: 'A full moon 12° up, ahead and a little to the left.',
+    v: { phase: 0.5, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85 } },
+  { id: 'moonrise', name: 'Moonrise', grade: 'Ember', about: 'A full moon just clearing the horizon, dusky red through the thick air.',
+    v: { phase: 0.5, alt: 1.5, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85 } },
+  { id: 'golden', name: 'Golden Moon', grade: 'Golden Moon', about: 'A low full moon, turned gold, with long shadows across the clouds.',
+    v: { phase: 0.5, alt: 2.5, az: 4, earth: 1, lamps: 1.95, glow: 0.85 } },
+  { id: 'high', name: 'High Moon', grade: 'Moonlit Blue', about: 'A full moon high overhead, cool and bright, lighting the cloud tops from above.',
+    v: { phase: 0.5, alt: 24, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85 } },
+  { id: 'crescent', name: 'Crescent', grade: 'Deep Sea', about: 'A thin waxing crescent, its dark part lit by a strong earthshine.',
+    v: { phase: 0.12, alt: 8, az: MOON_AZ0, earth: 2, lamps: 1.95, glow: 0.85 } },
+  { id: 'newmoon', name: 'New Moon', grade: 'Sodium', about: 'No moon: the stars, and the towns glowing orange on the clouds from below.',
+    v: { phase: 0, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85 } }
+];
+let scn = null;   // the viewer's scenes (loaded with the sky settings; see loadScenes)
 
 function hexToLinear(hex, v) {
   const n = parseInt(hex.slice(1), 16);
@@ -2833,14 +2861,13 @@ function applyGrade() {
   u.uShadowAmt.value = grade.shadowAmt; u.uHighAmt.value = grade.highAmt;
   u.uLift.value = grade.lift; u.uSat.value = grade.sat; u.uContrast.value = grade.contrast;
   u.uVignette.value = grade.vignette; u.uGrain.value = grade.grain; u.uRays.value = grade.rays;
-  try { localStorage.setItem(GRADE_STORE, JSON.stringify(grade)); } catch (e) {}
 }
 
 const gradeEl = document.getElementById('grade');
 const gradeBody = document.getElementById('grade-body');
 const gradeToggle = gradeEl.querySelector('.toggle');
 const fmt = (c, v) => c.key === 'grain' ? (v * 1000).toFixed(0) : (c.min < 0 ? (v > 0 ? '+' : '') + v.toFixed(2) : v.toFixed(2));
-const TABS = [['colour', 'Colour'], ['weather', 'Weather'], ['sky', 'Sky'], ['sound', 'Sound'], ['display', 'Display']];
+const TABS = [['scene', 'Scene'], ['colour', 'Colour'], ['weather', 'Weather'], ['sky', 'Sky'], ['sound', 'Sound'], ['display', 'Display']];
 const TAB_STORE = 'moonlit-cloud-sea:tab';
 function buildPanel() {
   // one slider row: id, label, range and the words at each end
@@ -2867,6 +2894,12 @@ function buildPanel() {
      + '<button type="button" id="g-save-ok">Save</button><button type="button" id="g-save-cancel">Cancel</button></div>';
   h += '<div class="savemsg" id="g-save-msg" role="status"></div>';
   pane.colour = h;
+
+  pane.scene = `<div class="presets" role="group" aria-label="Scenes" id="sc-list"></div>
+    <div class="about" id="sc-about"></div>
+    <div class="foot"><span id="sc-note"></span><span class="btns" id="sc-btns"></span></div>
+    <div class="saverow" id="sc-keep-row" hidden><input type="text" id="sc-keep-name" maxlength="24" aria-label="Scene name" autocomplete="off" spellcheck="false"><button type="button" id="sc-keep-ok">Keep</button><button type="button" id="sc-keep-cancel">Cancel</button></div>
+    <div class="savemsg" id="sc-keep-msg" role="status"></div>`;
 
   pane.weather = `<div class="sec">Lightning nearby</div>
     <label class="check"><input type="checkbox" id="w-on"> Lightning in the storm clouds</label>
@@ -2957,24 +2990,24 @@ function syncPanel() {
   renderProfiles();
 }
 const escHTML = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-let deleteArmed = 0;   // time the Delete button was first clicked (it needs a second click)
+let deleteArmed = 0;   // time a Delete button was first clicked (each needs a second click)
+const armed = () => deleteArmed && performance.now() - deleteArmed < 3000;
+function arm(render) { deleteArmed = performance.now(); render(); setTimeout(() => { deleteArmed = 0; render(); }, 3000); }
+// the grade library, with the active scene's grade marked, and what can be done with it
 function renderProfiles() {
-  const unsaved = grade.preset === 'Custom';
   let h = '';
   for (const n of Object.keys(GRADE_PRESETS)) h += `<button type="button" data-preset="${escHTML(n)}" aria-pressed="${grade.preset === n}">${escHTML(n)}</button>`;
   for (const n in profiles) h += `<button type="button" class="mine" data-preset="${escHTML(n)}" aria-pressed="${grade.preset === n}" title="Your profile">${escHTML(n)}</button>`;
-  if (unsaved || grade.draft) h += `<button type="button" class="draft" data-draft="1" aria-pressed="${unsaved}" title="Unsaved changes">Custom</button>`;
   document.getElementById('g-presets').innerHTML = h;
-  const mine = !unsaved && !isBuiltIn(grade.preset);
-  document.getElementById('g-name').textContent = unsaved ? 'Unsaved, from ' + grade.base : mine ? 'Your profile' : 'Built-in profile';
+  if (!scn) return;
+  const b = sceneById(scn.active), name = activeName();
+  const own = b && scn.grades[b.id];   // a built-in scene with a grade of its own
+  document.getElementById('g-name').textContent = name + ': ' + (grade.changed ? 'changed from ' : '') + grade.preset;
   let btns = '';
-  if (unsaved) {
-    btns += '<button type="button" id="g-revert" title="Back to ' + escHTML(grade.base) + '">Revert</button>';
-    if (!isBuiltIn(grade.base)) btns += '<button type="button" id="g-update" title="Save these changes to ' + escHTML(grade.base) + '">Save</button>';
-    btns += '<button type="button" id="g-saveas">Save as…</button>';
-  } else if (mine) {
-    btns += `<button type="button" id="g-delete">${deleteArmed && performance.now() - deleteArmed < 3000 ? 'Delete?' : 'Delete'}</button>`;
-  }
+  if (own || (!b && grade.changed)) btns += `<button type="button" id="g-revert" title="${b ? 'Back to ' + escHTML(b.grade) + ', the grade this scene came with' : 'Drop the changes'}">Revert</button>`;
+  if (grade.changed && !isBuiltIn(grade.preset)) btns += '<button type="button" id="g-update" title="Save these changes to ' + escHTML(grade.preset) + '">Save</button>';
+  if (grade.changed) btns += '<button type="button" id="g-saveas" title="Keep this grade in the library">Save as…</button>';
+  else if (!isBuiltIn(grade.preset)) btns += `<button type="button" id="g-delete" title="Remove ${escHTML(grade.preset)} from the library">${armed() ? 'Delete?' : 'Delete'}</button>`;
   document.getElementById('g-btns').innerHTML = btns;
 }
 function setSaveMsg(t) { document.getElementById('g-save-msg').textContent = t || ''; }
@@ -2983,7 +3016,7 @@ function showSaveRow(on) {
   r.hidden = !on;
   setSaveMsg('');
   if (on) {
-    inp.value = !isBuiltIn(grade.base) ? grade.base : '';
+    inp.value = !isBuiltIn(grade.preset) ? grade.preset : '';
     inp.focus(); inp.select();
     checkSaveName();
   }
@@ -2992,35 +3025,36 @@ function showSaveRow(on) {
 function checkSaveName() {
   const n = document.getElementById('g-save-name').value.trim(), ok = document.getElementById('g-save-ok');
   if (!n) { ok.disabled = true; ok.textContent = 'Save'; setSaveMsg(''); return; }
-  if (isBuiltIn(n) || n === 'Custom') { ok.disabled = true; ok.textContent = 'Save'; setSaveMsg('That name belongs to a built-in profile.'); return; }
+  if (isBuiltIn(n)) { ok.disabled = true; ok.textContent = 'Save'; setSaveMsg('That name belongs to a built-in profile.'); return; }
   ok.disabled = false;
   const exists = profileValues(n) !== null;
   ok.textContent = exists ? 'Replace' : 'Save';
   setSaveMsg(exists ? 'You already have a profile called ' + n + '. Replace it?' : '');
 }
+// the active scene's grade becomes this library profile, or these values (its own)
+function setSceneGrade(from, values) {
+  setGradeSlot({ from, values: gradeValues(values) });
+  saveScenes();
+  loadSceneGrade();
+}
+function loadSceneGrade() {
+  const slot = gradeSlot();
+  grade = Object.assign({ preset: slot.from, changed: !sameGrade(slot.values, profileValues(slot.from)) }, gradeValues(slot.values));
+  syncPanel(); applyGrade();
+}
 function saveAs() {
   const n = document.getElementById('g-save-name').value.trim();
-  if (!n || isBuiltIn(n) || n === 'Custom') return;
+  if (!n || isBuiltIn(n)) return;
   profiles[n] = gradeValues(grade);
   saveProfiles();
-  grade.preset = n; delete grade.base; grade.draft = null;
   showSaveRow(false);
-  syncPanel(); applyGrade();
+  setSceneGrade(n, grade);
 }
 function selectProfile(name) {
   const v = profileValues(name);
   if (!v) return;
-  // unsaved changes are kept behind the Custom button rather than lost
-  const draft = grade.preset === 'Custom' ? { base: grade.base, values: gradeValues(grade) } : grade.draft || null;
-  grade = Object.assign({ preset: name, draft }, gradeValues(v));
   showSaveRow(false);
-  syncPanel(); applyGrade();
-}
-function restoreDraft() {
-  if (grade.preset === 'Custom' || !grade.draft) return;
-  const d = grade.draft;
-  grade = Object.assign({ preset: 'Custom', base: d.base, draft: null }, gradeValues(d.values));
-  syncPanel(); applyGrade();
+  setSceneGrade(name, v);
 }
 buildPanel(); syncPanel(); applyGrade();
 gradeBody.addEventListener('keydown', e => {
@@ -3041,12 +3075,12 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.id === 'g-save-name') { checkSaveName(); return; }
+  if (t.id === 'sc-keep-name') { checkKeepName(); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
   else return;
-  // the first change to a profile starts new unsaved changes from it (replacing any older ones)
-  if (grade.preset !== 'Custom') { grade.base = grade.preset; grade.preset = 'Custom'; grade.draft = null; }
-  syncPanel(); applyGrade();
+  // a change to the grade is the active scene's alone
+  setSceneGrade(grade.preset, grade);
 });
 gradeBody.addEventListener('click', e => {
   const b = e.target.closest('button');
@@ -3059,34 +3093,39 @@ gradeBody.addEventListener('click', e => {
   if (b.id === 'p-reset') { resetAir(); return; }
   if (b.id === 's-met-now') { launchMeteor(); return; }
   if (b.dataset.preset) { selectProfile(b.dataset.preset); return; }
-  if (b.dataset.draft) { restoreDraft(); return; }
-  if (b.id === 'g-revert') {   // back to the profile the changes started from; they are dropped
-    grade = Object.assign({ preset: grade.base, draft: null }, gradeValues(profileValues(grade.base)));
-    showSaveRow(false); syncPanel(); applyGrade(); return;
+  if (b.dataset.scene) { pickScene(b.dataset.scene); return; }
+  if (b.id === 'sc-add') { addScene(); return; }
+  if (b.id === 'sc-delete') { if (!armed()) { arm(renderScenes); return; } deleteArmed = 0; deleteScene(); return; }
+  if (b.id === 'sc-discard') { discardDraft(); return; }
+  if (b.id === 'sc-keep') { showKeepRow(document.getElementById('sc-keep-row').hidden); return; }
+  if (b.id === 'sc-keep-ok') { keepFromRow(); return; }
+  if (b.id === 'sc-keep-cancel') { showKeepRow(false); return; }
+  if (b.id === 'g-revert') {
+    // a built-in scene goes back to the grade it came with; a custom one drops the changes
+    const sb = sceneById(scn.active);
+    if (sb) { delete scn.grades[sb.id]; saveScenes(); loadSceneGrade(); }
+    else setSceneGrade(grade.preset, profileValues(grade.preset));
+    showSaveRow(false); return;
   }
   if (b.id === 'g-update') {
-    profiles[grade.base] = gradeValues(grade); saveProfiles();
-    grade.preset = grade.base; delete grade.base;
-    syncPanel(); applyGrade(); return;
+    profiles[grade.preset] = gradeValues(grade); saveProfiles();
+    setSceneGrade(grade.preset, grade); return;
   }
   if (b.id === 'g-saveas') { showSaveRow(document.getElementById('g-save').hidden); return; }
   if (b.id === 'g-save-ok') { saveAs(); return; }
   if (b.id === 'g-save-cancel') { showSaveRow(false); return; }
   if (b.id === 'g-delete') {
-    const now = performance.now();
-    if (!deleteArmed || now - deleteArmed > 3000) { deleteArmed = now; renderProfiles(); setTimeout(() => { deleteArmed = 0; renderProfiles(); }, 3000); return; }
+    if (!armed()) { arm(renderProfiles); return; }
     deleteArmed = 0;
-    // the look stays, as unsaved changes from the default, so it can be saved again
-    delete profiles[grade.preset]; saveProfiles();
-    grade.preset = 'Custom'; grade.base = GRADE_DEFAULT;
-    if (grade.draft && !profileValues(grade.draft.base)) grade.draft = null;
-    syncPanel(); applyGrade(); return;
+    forgetProfile(grade.preset);
+    return;
   }
 });
 gradeBody.addEventListener('keydown', e => {
-  if (e.target.id !== 'g-save-name') return;
-  if (e.key === 'Enter') { saveAs(); e.preventDefault(); }
-  else if (e.key === 'Escape') { showSaveRow(false); e.preventDefault(); e.stopPropagation(); }
+  const id = e.target.id;
+  if (id !== 'g-save-name' && id !== 'sc-keep-name') return;
+  if (e.key === 'Enter') { if (id === 'g-save-name') saveAs(); else keepFromRow(); e.preventDefault(); }
+  else if (e.key === 'Escape') { if (id === 'g-save-name') showSaveRow(false); else showKeepRow(false); e.preventDefault(); e.stopPropagation(); }
 });
 function setPanel(open) {
   gradeEl.classList.toggle('open', open);
@@ -3508,6 +3547,7 @@ function onSkyInput(t) {
   else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
+  if (/^s-(phase|alt|az|earth|lamps|glow)$/.test(t.id)) sceneEdited();
   syncSky();
 }
 
@@ -3552,7 +3592,182 @@ function updateMeteor(dt) {
     met.next = clock + meteorGap();
   } else if (!DBG && clock >= met.next) { launchMeteor(); if (!met.on) met.next = clock + meteorGap(); }
 }
-syncSky();
+
+/* ---------------------------------------------------------------------------
+   Scenes, as the viewer has them: which is active, the built-in scenes' own grades, and the
+   custom scenes (see SCENES). Saved per viewer.
+--------------------------------------------------------------------------- */
+const SCENE_STORE = 'moonlit-cloud-sea:scenes:v1';
+// The scenes besides the built-in ones: one unsaved scene (scn.draft, shown as Custom), which a
+// change to a built-in scene starts and a change to another built-in scene replaces, and the
+// viewer's kept scenes (scn.kept), which only ever change while they are the active scene.
+const DRAFT = 'draft';
+const sceneById = id => SCENES.find(x => x.id === id) || null;
+const keptById = id => scn.kept.find(x => x.id === id) || null;
+const activeOwn = () => scn.active === DRAFT ? scn.draft : keptById(scn.active);   // a scene that is not built in
+const activeName = () => { const b = sceneById(scn.active); return b ? b.name : scn.active === DRAFT ? 'Custom' : keptById(scn.active).name; };
+function sceneValues() { const v = {}; for (const k of SCENE_KEYS) v[k] = sky[k]; return v; }
+function saveScenes() { try { localStorage.setItem(SCENE_STORE, JSON.stringify(scn)); } catch (e) {} }
+const assigned = b => ({ from: b.grade, values: gradeValues(profileValues(b.grade)) });
+const copySlot = g => ({ from: g.from, values: gradeValues(g.values) });
+// the active scene's grade, as { from: a library profile, values }
+function gradeSlot() {
+  const b = sceneById(scn.active);
+  return b ? (scn.grades[b.id] || assigned(b)) : activeOwn().grade;
+}
+function setGradeSlot(slot) {
+  const b = sceneById(scn.active);
+  if (!b) { activeOwn().grade = slot; return; }
+  if (slot.from === b.grade && sameGrade(slot.values, profileValues(b.grade))) delete scn.grades[b.id];   // just what it came with
+  else scn.grades[b.id] = slot;
+}
+// the lowest free "Scene N" name
+function nextSceneName() { let n = 1; while (scn.kept.some(k => k.name === 'Scene ' + n)) n++; return 'Scene ' + n; }
+function newKept(name, values, grade) {
+  const k = { id: 'k' + scn.next++, name, values: Object.assign({}, values), grade: copySlot(grade) };
+  scn.kept.push(k);
+  return k;
+}
+function loadScenes() {
+  try { scn = JSON.parse(localStorage.getItem(SCENE_STORE) || 'null'); } catch (e) { scn = null; }
+  const okSlot = g => g && typeof g === 'object' && g.values ? { from: profileValues(g.from) ? g.from : GRADE_DEFAULT, values: gradeValues(g.values) } : null;
+  const okValues = v => { if (!v || typeof v !== 'object') return null; const o = {}; for (const k of SCENE_KEYS) o[k] = typeof v[k] === 'number' ? v[k] : SCENES[0].v[k]; return o; };
+  if (!scn || typeof scn !== 'object') {
+    // the first visit since there were scenes: carry over the sky and grade saved before them
+    scn = { active: SCENES[0].id, grades: {}, draft: null, kept: [], next: 1 };
+    let g = null;
+    if (oldGrade && typeof oldGrade === 'object') {
+      const from = profileValues(oldGrade.preset) ? oldGrade.preset : profileValues(oldGrade.base) ? oldGrade.base : GRADE_DEFAULT;
+      g = { from, values: gradeValues(oldGrade) };
+    }
+    const d = SCENES[0];
+    if (SCENE_KEYS.some(k => Math.abs(sky[k] - d.v[k]) > 1e-6)) scn.active = newKept(nextSceneName(), sceneValues(), g || assigned(d)).id;
+    else if (g && !(g.from === d.grade && sameGrade(g.values, profileValues(d.grade)))) scn.grades[d.id] = g;
+  }
+  // (scenes saved while custom scenes were numbered slots: the filled ones are kept)
+  if (!Array.isArray(scn.kept)) scn.kept = Array.isArray(scn.custom) ? scn.custom.filter(c => c && c.values) : [];
+  delete scn.custom;
+  const grades = {};
+  for (const id in (scn.grades || {})) { const g = okSlot(scn.grades[id]); if (sceneById(id) && g) grades[id] = g; }
+  scn.grades = grades;
+  scn.kept = scn.kept.filter(k => k && typeof k.id === 'string' && typeof k.name === 'string' && okValues(k.values))
+    .map(k => ({ id: k.id, name: k.name.slice(0, 24), values: okValues(k.values), grade: okSlot(k.grade) || assigned(SCENES[0]) }));
+  const dr = scn.draft;
+  scn.draft = dr && sceneById(dr.from) && okValues(dr.values) ? { from: dr.from, values: okValues(dr.values), grade: okSlot(dr.grade) || assigned(sceneById(dr.from)) } : null;
+  if (!(scn.next >= 1)) scn.next = 1;
+  while (scn.kept.some(k => k.id === 'k' + scn.next)) scn.next++;
+  if (!(sceneById(scn.active) || (scn.active === DRAFT && scn.draft) || keptById(scn.active))) scn.active = SCENES[0].id;
+  saveScenes();
+}
+// the active scene onto the controls, the moon and the grade
+function applyScene() {
+  const b = sceneById(scn.active), v = b ? b.v : activeOwn().values;
+  const moved = v.alt !== sky.alt || v.az !== sky.az;
+  for (const k of SCENE_KEYS) sky[k] = v[k];
+  try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
+  syncSky();
+  showSaveRow(false); showKeepRow(false);
+  loadSceneGrade();
+  renderScenes();
+  if (moved && baked) requestMoonBake();
+}
+function pickScene(id) {
+  if (!(sceneById(id) || (id === DRAFT && scn.draft) || keptById(id))) return;
+  scn.active = id; deleteArmed = 0;
+  saveScenes(); applyScene();
+}
+// + keeps what is on screen now as a scene of the viewer's own
+function addScene() { scn.active = newKept(nextSceneName(), sceneValues(), gradeSlot()).id; deleteArmed = 0; saveScenes(); applyScene(); }
+function deleteScene() {
+  const k = keptById(scn.active);
+  if (!k) return;
+  scn.kept = scn.kept.filter(x => x !== k);
+  scn.active = SCENES[0].id;
+  saveScenes(); applyScene();
+}
+// the unsaved scene is dropped, back to the built-in scene it came from
+function discardDraft() {
+  if (!scn.draft) return;
+  scn.active = scn.draft.from; scn.draft = null;
+  saveScenes(); applyScene();
+}
+// the unsaved scene becomes a kept one (replacing a kept scene of the same name)
+function keepDraft(name) {
+  const d = scn.draft;
+  if (!d) return;
+  const same = scn.kept.find(k => k.name === name);
+  if (same) { same.values = Object.assign({}, d.values); same.grade = copySlot(d.grade); scn.active = same.id; }
+  else scn.active = newKept(name, d.values, d.grade).id;
+  scn.draft = null;
+  saveScenes(); applyScene();
+}
+// A scene setting was changed on the panel (the new value is already in sky). A built-in scene
+// never changes: the change starts the unsaved scene from it, replacing any earlier one. The
+// unsaved scene and kept scenes just take the change.
+function sceneEdited() {
+  const b = sceneById(scn.active);
+  if (b) {
+    scn.draft = { from: b.id, values: sceneValues(), grade: copySlot(gradeSlot()) };
+    scn.active = DRAFT;
+    loadSceneGrade();
+  } else activeOwn().values = sceneValues();
+  saveScenes();
+  renderScenes();
+}
+// a library profile is deleted: scenes whose grade came from it keep that grade, as their own
+function forgetProfile(name) {
+  delete profiles[name]; saveProfiles();
+  for (const id in scn.grades) {
+    const g = scn.grades[id], b = sceneById(id);
+    if (g.from !== name) continue;
+    g.from = b.grade;
+    if (sameGrade(g.values, profileValues(b.grade))) delete scn.grades[id];
+  }
+  for (const k of scn.kept) if (k.grade.from === name) k.grade.from = GRADE_DEFAULT;
+  if (scn.draft && scn.draft.grade.from === name) scn.draft.grade.from = GRADE_DEFAULT;
+  saveScenes(); loadSceneGrade();
+}
+function renderScenes() {
+  if (!scn) return;
+  let h = '';
+  for (const b of SCENES) h += `<button type="button" data-scene="${b.id}" aria-pressed="${scn.active === b.id}">${escHTML(b.name)}</button>`;
+  for (const k of scn.kept) h += `<button type="button" class="mine" data-scene="${escHTML(k.id)}" aria-pressed="${scn.active === k.id}" title="Your scene">${escHTML(k.name)}</button>`;
+  if (scn.draft) h += `<button type="button" class="draft" data-scene="${DRAFT}" aria-pressed="${scn.active === DRAFT}" title="Unsaved, from ${escHTML(sceneById(scn.draft.from).name)}">Custom</button>`;
+  h += '<button type="button" id="sc-add" class="add" title="Keep what is on screen now as a scene of your own" aria-label="Keep what is on screen as a new scene">+</button>';
+  document.getElementById('sc-list').innerHTML = h;
+  const b = sceneById(scn.active), draft = scn.active === DRAFT;
+  document.getElementById('sc-about').textContent = b ? b.about
+    : draft ? 'Unsaved changes to ' + sceneById(scn.draft.from).name + '. Keep them as a scene of your own, or changing another built-in scene will replace them.'
+    : 'Your scene. Every change made while it is active is kept.';
+  document.getElementById('sc-note').textContent = b ? 'Changing it makes an unsaved scene' : draft ? 'Unsaved' : '';
+  document.getElementById('sc-btns').innerHTML = draft
+    ? '<button type="button" id="sc-discard" title="Back to ' + escHTML(sceneById(scn.draft.from).name) + '">Discard</button><button type="button" id="sc-keep">Keep…</button>'
+    : b ? '' : `<button type="button" id="sc-delete">${armed() ? 'Delete?' : 'Delete'}</button>`;
+}
+// naming the unsaved scene before it is kept
+function setKeepMsg(t) { document.getElementById('sc-keep-msg').textContent = t || ''; }
+function showKeepRow(on) {
+  const r = document.getElementById('sc-keep-row'), inp = document.getElementById('sc-keep-name');
+  r.hidden = !on;
+  setKeepMsg('');
+  if (on) { inp.value = nextSceneName(); inp.focus(); inp.select(); checkKeepName(); }
+}
+function checkKeepName() {
+  const n = document.getElementById('sc-keep-name').value.trim(), ok = document.getElementById('sc-keep-ok');
+  if (!n) { ok.disabled = true; ok.textContent = 'Keep'; setKeepMsg(''); return; }
+  if (SCENES.some(b => b.name === n) || n === 'Custom') { ok.disabled = true; ok.textContent = 'Keep'; setKeepMsg('That name belongs to a built-in scene.'); return; }
+  ok.disabled = false;
+  const exists = scn.kept.some(k => k.name === n);
+  ok.textContent = exists ? 'Replace' : 'Keep';
+  setKeepMsg(exists ? 'You already have a scene called ' + n + '. Replace it?' : '');
+}
+function keepFromRow() {
+  const n = document.getElementById('sc-keep-name').value.trim();
+  if (!n || SCENES.some(b => b.name === n) || n === 'Custom') return;
+  keepDraft(n);
+}
+loadScenes();
+applyScene();
 met.next = clock + meteorGap();
 
 /* ---------------------------------------------------------------------------

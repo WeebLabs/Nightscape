@@ -20,6 +20,7 @@ Be sure to stop by the [Weeb Labs Discord server](https://discord.gg/RCyqxAQ5xS)
   - [Using it as a wallpaper](#using-it-as-a-wallpaper)
 - [Controls](#controls)
 - [Settings](#settings)
+  - [Scene](#scene)
   - [Colour](#colour)
   - [Weather](#weather)
   - [Sky](#sky)
@@ -107,11 +108,28 @@ If your operating system is set to reduce motion, the flight runs at 35% of its 
 
 ## Settings
 
-Press `G` or click the corner button to open the panel. Its settings are organised into five tabs, Colour, Weather, Sky, Sound and Display, which match the sections below. The tab bar stays in view while a long tab scrolls, and the panel reopens on the tab you used last. Every change takes effect immediately.
+Press `G` or click the corner button to open the panel. Its settings are organised into six tabs, Scene, Colour, Weather, Sky, Sound and Display, which match the sections below. The tab bar stays in view while a long tab scrolls, and the panel reopens on the tab you used last. Every change takes effect immediately.
+
+### Scene
+
+A scene is the look of one moment: the moon's phase, height and direction, its earthshine, the town lights and their glow on the clouds, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
+
+| Scene | Moon | Grade |
+| --- | --- | --- |
+| **Moonlit Night** (default) | Full, 12° up, 15° left | Teal Night |
+| **Moonrise** | Full, just clearing the horizon at 1.5°, dusky red | Ember |
+| **Golden Moon** | Full, 2.5° up and 4° right, gold | Golden Moon |
+| **High Moon** | Full, 24° up, cool and bright | Moonlit Blue |
+| **Crescent** | A thin waxing crescent 8° up, with strong earthshine | Deep Sea |
+| **New Moon** | None: the stars, and the towns' orange glow on the clouds | Sodium |
+
+The built-in scenes never change. Changing any of their settings, in the Sky tab, carries the scene into one unsaved scene, shown in italics as **Custom**, and continues there. There is only ever one: changing a different built-in scene replaces it. **Keep…** names it and saves it as a scene of your own, with its grade, and **Discard** drops it and returns to the built-in scene it came from. **+** keeps whatever is on screen straight away as a new scene of your own. Your own scenes are shown with a dashed outline. Each keeps every change made while it is active, is never changed by anything done elsewhere, and can be deleted with a second click to confirm.
+
+Each scene has its own grade. Changing the grade while in a scene changes it for that scene alone. **Revert** returns a built-in scene to the grade it came with.
 
 ### Colour
 
-The grade is applied in the final pass, after ACES tone mapping, so it costs nothing measurable per frame. Five presets set every control at once:
+The grade is applied in the final pass, after ACES tone mapping, so it costs nothing measurable per frame. The controls below edit the active scene's grade. The library of profiles sets every control at once:
 
 | Preset | Look |
 | --- | --- |
@@ -120,14 +138,16 @@ The grade is applied in the final pass, after ACES tone mapping, so it costs not
 | **Golden Moon** | Warm moonlight over blue clouds, with stronger light shafts |
 | **Deep Sea** | Saturated cyan-teal with deep shadows |
 | **Silver** | Nearly monochrome |
+| **Ember** | Blue shadows and warm highlights with no green, for a moon on the horizon |
+| **Sodium** | Cool shadows that keep the towns' orange glow warm, for a moonless night |
 
-Changing any control turns the grade into unsaved changes, shown as **Custom**, and the panel names the profile they started from. From there:
+Picking a profile, or changing any control, changes only the active scene's grade. The panel names the scene and the profile its grade came from, and whether it has been changed. From there:
 
-- **Revert** drops the changes and returns to that profile.
-- **Save as…** names them and keeps them as your own profile, shown among the presets with a dashed outline. Built-in names are refused, and saving over one of your own names asks you to confirm.
-- **Save** appears when the changes started from one of your own profiles, and updates that profile.
+- **Revert** returns a built-in scene to the grade it came with, or drops the changes in a custom scene.
+- **Save as…** names the grade and keeps it in the library as your own profile, shown with a dashed outline. Built-in names are refused, and saving over one of your own names asks you to confirm.
+- **Save** appears when the grade came from one of your own profiles and has been changed, and updates that profile.
 
-A saved profile only changes when you save to it, so picking a built-in preset and changing it never touches your own profiles. Unsaved changes aren't lost by picking another profile either: they wait behind the **Custom** button until you change a profile again. Your own profiles can be deleted, with a second click to confirm. Deleting the one in use keeps its look as unsaved changes, so it can still be saved again.
+A library profile only changes when you save to it, so changing the grade in a scene never touches your own profiles. Your own profiles can be deleted, with a second click to confirm. Scenes whose grade came from a deleted profile keep their grade as their own.
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -248,8 +268,9 @@ All settings are saved per browser in `localStorage`, under these keys:
 
 | Key | Holds |
 | --- | --- |
-| `moonlit-cloud-sea:grade:v1` | Colour grade, the profile in use and any unsaved changes |
-| `moonlit-cloud-sea:grade-profiles:v1` | Your own saved colour grade profiles |
+| `moonlit-cloud-sea:scenes:v1` | The active scene, the built-in scenes' own grades, the unsaved scene and your own scenes |
+| `moonlit-cloud-sea:grade-profiles:v1` | Your own colour grade profiles in the library |
+| `moonlit-cloud-sea:grade:v1` | The colour grade from before there were scenes, read once to carry it over |
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
