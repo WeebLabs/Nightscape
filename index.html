@@ -316,6 +316,98 @@ vec3 skyBase(vec3 rd, vec3 m){
 }
 `;
 
+// The moon's phase, shared by the passes that draw its glow: the clouds' fog and the composite.
+// They declare uMoonPhase, uMoonR and uMoonL themselves.
+const MOON_SKY = `
+// How brightly sunlight lights the point of the disc with surface normal n (x right, z toward
+// us) at this phase; waxing moons are lit on the right. Lunar soil throws light back the way it
+// came, so a full moon is evenly bright right out to its edge rather than shaded like a matte
+// ball: the Lommel-Seeliger law gives that, and fades to nothing at the terminator. On top of
+// that the whole surface is dimmer away from full (the opposition surge). w softens the
+// terminator to about a pixel.
+float moonLit(vec3 n, float w){
+  float pa = uMoonPhase * 6.2831853;
+  vec3 L = vec3(sin(pa), 0.0, -cos(pa));
+  float mu0 = dot(n, L);
+  float ls = min(2.0 * max(mu0, 0.0) / max(mu0 + n.z, 1e-4), 1.6);
+  float alpha = abs(3.1415927 - pa);   // phase angle: 0 at full
+  return ls * smoothstep(0.0, w, mu0) * (0.4 + 0.6 * exp(-1.2 * alpha));
+}
+// The same, for any direction on the sky near the moon (0 on its dark part, 1 on the lit part).
+float moonLitAt(vec3 rd, vec3 m){
+  vec3 mr = normalize(cross(m, vec3(0.0, 1.0, 0.0)));
+  vec3 mu = cross(mr, m);
+  vec2 uv = vec2(dot(rd, mr), dot(rd, mu)) / uMoonR;
+  float r = min(length(uv), 1.0);
+  return clamp(moonLit(vec3(uv, sqrt(1.0 - r * r)), 0.02), 0.0, 1.0);
+}
+
+// The moon's narrow glow is light from its lit part, scattered a little on the way through the
+// air: the lit part, blurred. These blur the lit part and the whole disc with the same kernel and
+// take the ratio, which scales skyBase's glow (made for a full moon) to the phase. Each row of the
+// disc is blurred along x by exp(-kx|dx|), which integrates exactly, weighted by exp(-k|dy|). kx
+// narrows with |dy| the way a round blur would, so the edge between lit and dark widens away from
+// the moon instead of running off as a sharp line. uv and k are in moon radii. The ratio is
+// exactly 1 at full moon, so the full moon looks as it always has.
+float glowRow(float a, float b, float p, float k){   // the integral of exp(-k|x - p|) over [a, b], times k
+  if (b <= a) return 0.0;
+  float ea = exp(-k * abs(a - p)), eb = exp(-k * abs(b - p));
+  if (p < a) return ea * (1.0 - exp(-k * (b - a)));
+  if (p > b) return eb * (1.0 - exp(-k * (b - a)));
+  return 2.0 - ea - eb;
+}
+vec2 moonGlowK(vec2 uv){   // x: for the 28 term of skyBase's narrow glow, y: for the 90 term
+  float pa = uMoonPhase * 6.2831853;
+  float c = cos(pa), sg = sin(pa) >= 0.0 ? 1.0 : -1.0;
+  vec2 k = vec2(28.0, 90.0) * uMoonR;
+  vec2 L = vec2(0.0), D = vec2(0.0);
+  for (int i = 0; i < 16; i++){
+    float y = -1.0 + (float(i) + 0.5) * 0.125;
+    float s = sqrt(1.0 - y * y);
+    // the lit part of this row runs from the terminator, at c * s, to the limb
+    float a = sg > 0.0 ? c * s : -s, b = sg > 0.0 ? s : -c * s;
+    float dy = abs(y - uv.y);
+    vec2 kx = k / sqrt(1.0 + k * dy);
+    vec2 wy = exp(-k * dy) / kx;
+    L += wy * vec2(glowRow(a, b, uv.x, kx.x), glowRow(a, b, uv.x, kx.y));
+    D += wy * vec2(glowRow(-s, s, uv.x, kx.x), glowRow(-s, s, uv.x, kx.y));
+  }
+  return L / max(D, vec2(1e-30));
+}
+
+// moonLitAt, but only on the disc (1 everywhere else). am: the angle from the moon's centre.
+float moonLitSky(vec3 rd, vec3 m, float am){
+  float diskMask = 1.0 - smoothstep(uMoonR * 0.92, uMoonR * 0.99, am);
+  return diskMask > 0.0 ? moonLitAt(rd, m) : 1.0;
+}
+
+// skyBase with its halo terms fitted to the phase. The wide ones are a general brightening of the
+// sky and just fade. The narrow ones come from the lit part only (moonGlowK), dimmed like the disc
+// by the opposition surge, so a crescent glows along its bright edge and hardly at all past its
+// dark one. Far from the moon the ratio settles to the lit fraction, and it is only worked out
+// where the narrow glow is still visible. skyBase's narrow glow also peaks at the centre of the
+// disc; over the dark part it is held at its strength at the limb instead (amD), so it does not
+// show there as a bright spot in the middle. At full moon all of this gives skyBase unchanged.
+vec3 moonNight(vec3 rd, vec3 m, float am, float litAt){
+  float haloK = mix(0.08, 1.0, uMoonL);
+  float pa = uMoonPhase * 6.2831853;
+  float surge = 0.4 + 0.6 * exp(-1.2 * abs(3.1415927 - pa));
+  vec2 gk = vec2(0.5 - 0.5 * cos(pa));
+  if (am < 0.3){
+    vec3 mr = normalize(cross(m, vec3(0.0, 1.0, 0.0)));
+    vec3 mu = cross(mr, m);
+    gk = mix(moonGlowK(vec2(dot(rd, mr), dot(rd, mu)) / uMoonR), gk, smoothstep(0.22, 0.3, am));
+  }
+  gk *= surge;
+  vec3 haloW = vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-am * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-am * 8.5);
+  float amD = mix(max(am, uMoonR), am, litAt);
+  vec3 h28 = vec3(1.00, 0.90, 0.74) * 0.1100, h90 = vec3(1.00, 0.93, 0.80) * 0.4500;
+  return skyBase(rd, m) - haloW * (1.0 - haloK)
+       - h28 * (exp(-am * 28.0) - exp(-amD * 28.0) * gk.x)
+       - h90 * (exp(-am * 90.0) - exp(-amD * 90.0) * gk.y);
+}
+`;
+
 const WORLD = `
 // The world is one 320 x 320 tile repeated forever: every noise frequency is a
 // whole number of cycles per tile, and the tower grid has 13 cells per tile.
@@ -834,8 +926,10 @@ uniform vec3 uCamPos, uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime, uFrame;
 uniform float uNoClouds;
 uniform float uMoonL, uMoonA;   // moon phase: strength of its direct light, and of the night sky's glow (1 at full)
+uniform float uMoonPhase, uMoonR;
 varying vec2 vUv;
 ${COMMON}
+${MOON_SKY}
 
 const vec3 MOON_COOL = vec3(0.74, 0.84, 1.00);
 const vec3 MOON_WARM = vec3(1.00, 0.88, 0.70);
@@ -907,7 +1001,9 @@ void main(){
   float ph1 = mix(hg(cosT, -0.11), hg(cosT, 0.42), 0.70);
   float ph2 = mix(hg(cosT, -0.05), hg(cosT, 0.20), 0.70);
   float backlit = smoothstep(0.35, 0.97, cosT);
-  vec3 fogC = skyBase(rd, uMoonDir) * 0.94;
+  // (the fog takes the sky's colour, with the moon's glow fitted to the phase as in the sky)
+  float amF = 2.0 * asin(clamp(length(rd - uMoonDir) * 0.5, 0.0, 1.0));
+  vec3 fogC = moonNight(rd, uMoonDir, amF, moonLitSky(rd, uMoonDir, amF)) * 0.94;
   const vec3 AIR_C = vec3(0.0060, 0.0112, 0.0245) * 0.94;   // the sky's plain horizon blue
 
   float jit = ign(gl_FragCoord.xy + mod(uFrame, 64.0) * 5.588238);
@@ -1350,6 +1446,7 @@ uniform vec3 uBalance, uShadowTint, uHighTint;
 uniform float uShadowAmt, uHighAmt, uLift, uSat, uContrast, uVignette, uGrain, uRays;
 varying vec2 vUv;
 ${COMMON}
+${MOON_SKY}
 
 // Film grain: soft value noise on a lattice a little over a pixel across (scaled with
 // the screen, as grain is a fixed size on the film frame).
@@ -1508,61 +1605,6 @@ vec3 aircraft(vec3 rd){
   return col * mix(0.5, 1.0, smoothstep(0.02, 0.15, rd.y));   // dimmer low down, through more air
 }
 
-// How brightly sunlight lights the point of the disc with surface normal n (x right, z toward
-// us) at this phase; waxing moons are lit on the right. Lunar soil throws light back the way it
-// came, so a full moon is evenly bright right out to its edge rather than shaded like a matte
-// ball: the Lommel-Seeliger law gives that, and fades to nothing at the terminator. On top of
-// that the whole surface is dimmer away from full (the opposition surge). w softens the
-// terminator to about a pixel.
-float moonLit(vec3 n, float w){
-  float pa = uMoonPhase * 6.2831853;
-  vec3 L = vec3(sin(pa), 0.0, -cos(pa));
-  float mu0 = dot(n, L);
-  float ls = min(2.0 * max(mu0, 0.0) / max(mu0 + n.z, 1e-4), 1.6);
-  float alpha = abs(3.1415927 - pa);   // phase angle: 0 at full
-  return ls * smoothstep(0.0, w, mu0) * (0.4 + 0.6 * exp(-1.2 * alpha));
-}
-// The same, for any direction on the sky near the moon (0 on its dark part, 1 on the lit part).
-float moonLitAt(vec3 rd, vec3 m){
-  vec3 mr = normalize(cross(m, vec3(0.0, 1.0, 0.0)));
-  vec3 mu = cross(mr, m);
-  vec2 uv = vec2(dot(rd, mr), dot(rd, mu)) / uMoonR;
-  float r = min(length(uv), 1.0);
-  return clamp(moonLit(vec3(uv, sqrt(1.0 - r * r)), 0.02), 0.0, 1.0);
-}
-
-// The moon's narrow glow is light from its lit part, scattered a little on the way through the
-// air: the lit part, blurred. These blur the lit part and the whole disc with the same kernel and
-// take the ratio, which scales skyBase's glow (made for a full moon) to the phase. Each row of the
-// disc is blurred along x by exp(-kx|dx|), which integrates exactly, weighted by exp(-k|dy|). kx
-// narrows with |dy| the way a round blur would, so the edge between lit and dark widens away from
-// the moon instead of running off as a sharp line. uv and k are in moon radii. The ratio is
-// exactly 1 at full moon, so the full moon looks as it always has.
-float glowRow(float a, float b, float p, float k){   // the integral of exp(-k|x - p|) over [a, b], times k
-  if (b <= a) return 0.0;
-  float ea = exp(-k * abs(a - p)), eb = exp(-k * abs(b - p));
-  if (p < a) return ea * (1.0 - exp(-k * (b - a)));
-  if (p > b) return eb * (1.0 - exp(-k * (b - a)));
-  return 2.0 - ea - eb;
-}
-vec2 moonGlowK(vec2 uv){   // x: for the 28 term of skyBase's narrow glow, y: for the 90 term
-  float pa = uMoonPhase * 6.2831853;
-  float c = cos(pa), sg = sin(pa) >= 0.0 ? 1.0 : -1.0;
-  vec2 k = vec2(28.0, 90.0) * uMoonR;
-  vec2 L = vec2(0.0), D = vec2(0.0);
-  for (int i = 0; i < 16; i++){
-    float y = -1.0 + (float(i) + 0.5) * 0.125;
-    float s = sqrt(1.0 - y * y);
-    // the lit part of this row runs from the terminator, at c * s, to the limb
-    float a = sg > 0.0 ? c * s : -s, b = sg > 0.0 ? s : -c * s;
-    float dy = abs(y - uv.y);
-    vec2 kx = k / sqrt(1.0 + k * dy);
-    vec2 wy = exp(-k * dy) / kx;
-    L += wy * vec2(glowRow(a, b, uv.x, kx.x), glowRow(a, b, uv.x, kx.y));
-    D += wy * vec2(glowRow(-s, s, uv.x, kx.x), glowRow(-s, s, uv.x, kx.y));
-  }
-  return L / max(D, vec2(1e-30));
-}
 
 vec3 moonDisk(vec3 rd, vec3 m){
   float c = dot(rd, m);
@@ -1615,26 +1657,10 @@ void main(){
   if (rd.y > 0.0 && rd.y < 0.3 && c.a > 0.0) st += heroStars(rd) * smoothstep(0.0, 0.015, rd.y) * smoothstep(0.03, 0.2, am);
   if (uMet.w > 0.0 && rd.y > 0.0 && c.a > 0.0) st += meteor(rd) * smoothstep(0.0, 0.03, rd.y);
   if (uAirOn > 0.0 && rd.y > 0.0 && c.a > 0.0) st += aircraft(rd) * smoothstep(0.0, 0.02, rd.y);
-  // skyBase's halo terms follow the phase. The wide ones are a general brightening of the sky and
-  // just fade. The narrow ones come from the lit part only (moonGlowK), dimmed like the disc by
-  // the opposition surge, so a crescent glows along its bright edge and hardly at all past its
-  // dark one. Far from the moon the ratio settles to the lit fraction, and it is only worked out
-  // where the narrow glow is still visible. The sky glow is hidden behind the lit part of the
-  // disc, as before.
-  float litAt = diskMask > 0.0 ? moonLitAt(rd, m) : 1.0;
-  float pa = uMoonPhase * 6.2831853;
-  float surge = 0.4 + 0.6 * exp(-1.2 * abs(3.1415927 - pa));
-  vec2 gk = vec2(0.5 - 0.5 * cos(pa));
-  if (am < 0.3){
-    vec3 mr = normalize(cross(m, vec3(0.0, 1.0, 0.0)));
-    vec3 mu = cross(mr, m);
-    gk = mix(moonGlowK(vec2(dot(rd, mr), dot(rd, mu)) / uMoonR), gk, smoothstep(0.22, 0.3, am));
-  }
-  gk *= surge;
-  vec3 haloW = vec3(0.30, 0.46, 0.90) * 0.0035 * exp(-am * 2.4) + vec3(0.55, 0.66, 0.88) * 0.0150 * exp(-am * 8.5);
-  vec3 night = skyBase(rd, m) - haloW * (1.0 - haloK)
-             - vec3(1.00, 0.90, 0.74) * 0.1100 * exp(-am * 28.0) * (1.0 - gk.x)
-             - vec3(1.00, 0.93, 0.80) * 0.4500 * exp(-am * 90.0) * (1.0 - gk.y);
+  // the night sky with the moon's glow fitted to the phase (moonNight), hidden behind the lit part
+  // of the disc, as before
+  float litAt = moonLitSky(rd, m, am);
+  vec3 night = moonNight(rd, m, am, litAt);
   vec3 sky = night * (1.0 - 0.82 * diskMask * litAt) + st + moonDisk(rd, m);
 
   vec3 col = c.rgb + sky * c.a;
@@ -1833,7 +1859,7 @@ const terA = makeTerRT(THREE.UnsignedByteType), terB = makeTerRT(THREE.UnsignedB
 const terL = makeTerRT(canFloat ? THREE.HalfFloatType : THREE.UnsignedByteType);   // town lights
 const NOCLOUDS = /[?&]noclouds\b/.test(location.search) ? 1 : 0;   // debug: show the ground alone
 const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Object.assign({
-  uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uNoClouds: { value: NOCLOUDS }
+  uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uNoClouds: { value: NOCLOUDS }, uMoonR: { value: MOON_R }
 }, camU, lightU, moonU));
 const groundPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + GROUND_FRAG, Object.assign({
   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, tCloud: { value: null },
