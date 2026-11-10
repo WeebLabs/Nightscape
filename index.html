@@ -1428,6 +1428,7 @@ uniform vec2 uCloudTexel, uRes;
 uniform vec3 uCamR, uCamU, uCamF, uMoonDir;
 uniform float uTanHalf, uAspect, uTime, uFrame, uPixAng, uMoonR, uExposure, uMoonReady;
 uniform float uTwinkle, uStarLow;   // Sky panel: how much stars twinkle, how low they reach
+uniform float uEarth;   // Sky panel: how bright the earthshine on the moon's dark part is (1 as designed)
 uniform float uMoonPhase;   // 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter
 uniform float uMoonL, uMoonA;   // moon phase: strength of its direct light, and of the night sky's glow (1 at full)
 uniform vec3 uMetA, uMetB;   // a shooting star: where it starts and where it would end on the sky
@@ -1624,7 +1625,7 @@ vec3 moonDisk(vec3 rd, vec3 m){
   float limb = 0.88 + 0.12 * pow(n.z, 0.6);
   vec3 tint = mix(vec3(1.00, 0.82, 0.60), vec3(1.0, 0.93, 0.80), n.z);
   // the dark part shows only a faint, cool earthshine, strongest when the moon is thin
-  vec3 earth = vec3(0.55, 0.68, 1.0) * alb * 0.004 * (1.0 - 0.7 * uMoonL);
+  vec3 earth = vec3(0.55, 0.68, 1.0) * alb * 0.004 * (1.0 - 0.7 * uMoonL) * uEarth;
   return mix(earth, tint * alb * limb * 1.3, moonLit(n, aa)) * edge;
 }
 
@@ -1884,7 +1885,7 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   tCloud: { value: null }, tRays: { value: null }, uNoise: { value: noiseTex },
   uCloudTexel: { value: new THREE.Vector2() }, uRes: { value: new THREE.Vector2() },
   uPixAng: { value: 0.001 }, uMoonR: { value: MOON_R }, uExposure: { value: 1.12 },
-  uTwinkle: { value: 1 }, uStarLow: { value: 0.035 },
+  uTwinkle: { value: 1 }, uStarLow: { value: 0.035 }, uEarth: { value: 1 },
   uMetA: { value: new THREE.Vector3(0, 0, 1) }, uMetB: { value: new THREE.Vector3(0, 0.1, 1) }, uMet: { value: new THREE.Vector4(0, 0, 0, 0) },
   uMoonMap: { value: null }, uMoonReady: { value: 0 },
   uBalance: { value: new THREE.Vector3(1, 1, 1) }, uShadowTint: { value: new THREE.Vector3(1, 1, 1) },
@@ -2742,6 +2743,7 @@ function buildPanel() {
 
   pane.sky = `<div class="sec">Moon</div>
     ${row('s-phase', 'Phase', 0, 1, 0.005, 'Waxing', 'Waning')}
+    ${row('s-earth', 'Earthshine', 0, 4, 0.05, 'None', 'Bright')}
     <div class="sec">Stars</div>
     ${row('s-twinkle', 'Twinkle', 0, 2, 0.05, 'Steady', 'Strong')}
     ${row('s-low', 'Stars reach down to', 0, 0.35, 0.005, 'Horizon', 'Higher')}
@@ -2823,7 +2825,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id.startsWith('d-')) { onFarInput(t); return; }
   if (t.id.startsWith('p-')) { onAirInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
@@ -3149,13 +3151,14 @@ air.next = clock + 90 + Math.random() * 150;     // the first one comes within a
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5 };
+let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
 const sLamps = document.getElementById('s-lamps'), sLampsV = document.getElementById('s-lamps-v');
 const sMet = document.getElementById('s-meteors'), sMetV = document.getElementById('s-meteors-v');
 const sPhase = document.getElementById('s-phase'), sPhaseV = document.getElementById('s-phase-v');
+const sEarth = document.getElementById('s-earth'), sEarthV = document.getElementById('s-earth-v');
 // The moon's phase, 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter. A thinner moon
 // lights the clouds and ground less: its direct light falls off faster than the lit fraction
 // (the surface itself is dimmer away from full), and the night sky's glow, which is mostly
@@ -3184,11 +3187,16 @@ function syncSky() {
   sPhase.value = sky.phase;
   const lit = setMoonPhase(+sky.phase);
   sPhaseV.textContent = MOON_PHASES[Math.round(sky.phase * 8) % 8] + ', ' + Math.round(lit * 100) + '%';
+  if (!(sky.earth >= 0 && sky.earth <= 4)) sky.earth = 1;
+  sEarth.value = sky.earth;
+  sEarthV.textContent = sky.earth === 0 ? 'off' : '×' + (+sky.earth).toFixed(2);
+  compPass.u.uEarth.value = sky.earth;
 }
 function onSkyInput(t) {
   if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value);
   else if (t.id === 's-lamps') sky.lamps = parseFloat(t.value);
   else if (t.id === 's-phase') sky.phase = parseFloat(t.value);
+  else if (t.id === 's-earth') sky.earth = parseFloat(t.value);
   else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}

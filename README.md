@@ -174,6 +174,7 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Phase | New, through full, back to new | Full moon | The moon's phase. The left half of the slider waxes, lit on the right, and the right half wanes. The readout names the phase and shows how much of the disc is lit. A thinner moon lights the clouds and ground less, casts weaker light shafts, has a fainter glow and lets more stars show around it. Town lights, mast beacons and lightning are not affected |
+| Earthshine | None to ×4 | ×1 | How bright the faint, cool earthshine on the moon's dark part is. It is strongest on a thin crescent and fades away toward full |
 
 **Stars**
 
@@ -242,7 +243,7 @@ All settings are saved per browser in `localStorage`, under these keys:
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
-| `moonlit-cloud-sea:sky:v1` | Moon phase, twinkle, star reach, shooting star rate and town light brightness |
+| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, twinkle, star reach, shooting star rate and town light brightness |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
 | `moonlit-cloud-sea:tab` | The settings tab you used last |
@@ -269,7 +270,7 @@ To return everything to the defaults, clear the site's storage in the browser, o
 
 **Radio masts.** The two highest summits in each world tile carry a thin lattice mast about 1.8 units (roughly 70 m) tall. Each has a red aircraft warning light on top that flashes every two seconds, out of step with the other mast, and a steady dimmer red light halfway up. A flash faintly reddens the summit around the mast's foot.
 
-**Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map, embedded in the page. It shows the real near side, north up, with the maria and Tycho in their correct places, inside a layered halo. It is full by default, and the Sky panel can set any phase. The lit part follows the way lunar soil reflects light, so a full moon stays evenly bright out to its edge, while the dark part of a crescent shows only a faint earthshine. The glow around the moon comes from its lit part alone, so a crescent glows along its bright edge and hardly at all past its dark one. The sky is a deep gradient with a warm glow along the horizon under the moon. Procedural stars fade near the moon's glare, twinkle irregularly a few times a second, and reach to within about 2° of the horizon. A few bright stars sit low ahead, dimmed and reddened by the thick air, and the lowest is a steady reddish planet.
+**Moon and sky.** The moon uses NASA's Lunar Reconnaissance Orbiter albedo map, embedded in the page. It shows the real near side, north up, with the maria and Tycho in their correct places, inside a layered halo. It is full by default, and the Sky panel can set any phase. The lit part follows the way lunar soil reflects light, so a full moon stays evenly bright out to its edge, while the dark part of a crescent shows only a faint earthshine, which the Sky panel can brighten or turn off. The glow around the moon comes from its lit part alone, so a crescent glows along its bright edge and hardly at all past its dark one. The sky is a deep gradient with a warm glow along the horizon under the moon. Procedural stars fade near the moon's glare, twinkle irregularly a few times a second, and reach to within about 2° of the horizon. A few bright stars sit low ahead, dimmed and reddened by the thick air, and the lowest is a steady reddish planet.
 
 **Shooting stars.** By default a meteor crosses the sky about twice a minute, at random. Both ends of its path are picked on screen, so the whole streak is visible. It stays at least 6° up, clear of the moon, heading generally downward and burning out above the horizon. Each one is a pixel-thin line with a hot blue-white head and a warmer fading trail, and it lasts 0.3 to 2 seconds. About one in twelve is a brighter, longer fireball. Clouds hide shooting stars just as they hide the stars.
 
