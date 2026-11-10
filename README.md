@@ -207,6 +207,7 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Town lights | Off to ×3 | ×1.95 | Brightness of the town, road and farmhouse lights and the glow they cast on the ground and lakes. It is a single multiplication at render time and needs no rebake. It does not affect the red mast lights |
+| Glow on clouds | None to ×3 | ×1 | How strongly the towns' scattered orange glow lights the deck from below. It shows on the underside of the cloud and creeps a little way up the walls of gaps. It grows as the moon thins: at ×1 it runs from a faint 0.2 at full moon to 0.55 at new moon, following the lit percentage, and the setting multiplies both ends. It also scales with Town lights |
 
 ### Sound
 
@@ -243,7 +244,7 @@ All settings are saved per browser in `localStorage`, under these keys:
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
-| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, twinkle, star reach, shooting star rate and town light brightness |
+| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, twinkle, star reach, shooting star rate, town light brightness and their glow on the clouds |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
 | `moonlit-cloud-sea:tab` | The settings tab you used last |
@@ -266,7 +267,7 @@ To return everything to the defaults, clear the site's storage in the browser, o
 
 **Flooded mountains.** About 85 units below the camera lie eroded ranges with sharp ridges, gullies and smooth valley floors, half drowned so the valleys become winding lakes and fjords. Forest covers the gentler slopes below a ragged tree line and gives way to meadow and bare rock on cliffs and peaks, with a dark wet band along the shores. The low moon throws long shadows across the ranges and lays a soft glitter path on the lakes. The lakes reflect the sky and the surrounding mountains. The cloud deck's shadow falls on all of it, so only ground under a break is moonlit.
 
-**Town lights.** Small towns of warm, sodium-orange street lights sit on dry, gentle ground near the valley floors and shores, about 18 per world tile. Each town is a loose street grid that thins out toward its edges. Strings of road lamps wind between neighbouring towns, skirting lakes and steep slopes, and single farmhouse lights dot the countryside in between. Every lamp lights the ground around it, and nearby lakes pick up a faint warm glow.
+**Town lights.** Small towns of warm, sodium-orange street lights sit on dry, gentle ground near the valley floors and shores, about 18 per world tile. Each town is a loose street grid that thins out toward its edges. Strings of road lamps wind between neighbouring towns, skirting lakes and steep slopes, and single farmhouse lights dot the countryside in between. Every lamp lights the ground around it, and nearby lakes pick up a faint warm glow. Their light, scattered by the haze below the deck, also lights the clouds from underneath: a soft orange glow on the deck's underside that creeps a little way up the walls of its gaps, stronger in some places than others. It is faint under a full moon and grows as the moon thins, showing clearly near new moon.
 
 **Radio masts.** The two highest summits in each world tile carry a thin lattice mast about 1.8 units (roughly 70 m) tall. Each has a red aircraft warning light on top that flashes every two seconds, out of step with the other mast, and a steady dimmer red light halfway up. A flash faintly reddens the summit around the mast's foot.
 

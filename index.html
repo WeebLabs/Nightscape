@@ -645,8 +645,24 @@ void main(){
     up += densLight(sceneSD(q)) * ds;
     tt += ds; ds *= 1.15;
   }
+  // A: how open the way down is, for the towns' light coming up from below: the light let through
+  // straight down and along four directions 35 degrees off it, averaged. Only points with a
+  // nearly clear way down to the open air below the deck get any: the cloud's underside, and the
+  // walls of gaps in the deck, which see down through the gap at a slant.
+  float dnT = 0.0;
+  for (int kd = 0; kd < 5; kd++){
+    vec3 v = kd == 0 ? vec3(0.0, -1.0, 0.0) : vec3(kd == 1 ? 0.57 : kd == 2 ? -0.57 : 0.0, -0.82, kd == 3 ? 0.57 : kd == 4 ? -0.57 : 0.0);
+    float dn = 0.0; ds = 0.3; tt = 0.0;
+    for (int i = 0; i < 16; i++){
+      vec3 q = p + v * (tt + ds * 0.5);
+      if (q.y < Y_MIN) break;
+      dn += densLight(sceneSD(q)) * ds;
+      tt += ds; ds *= 1.15;
+    }
+    dnT += exp(-dn * 1.2) * 0.2;
+  }
   // B: the cloud shape field itself, so rendering can read it instead of rebuilding it
-  gl_FragColor = vec4(1.0 - exp(-od * 0.25), 1.0 - exp(-up * 0.4), clamp((sceneSDFull(p) + 10.0) / 16.0, 0.0, 1.0), 1.0);
+  gl_FragColor = vec4(1.0 - exp(-od * 0.25), 1.0 - exp(-up * 0.4), clamp((sceneSDFull(p) + 10.0) / 16.0, 0.0, 1.0), dnT);
 }
 `;
 
@@ -927,6 +943,7 @@ uniform float uTanHalf, uAspect, uTime, uFrame;
 uniform float uNoClouds;
 uniform float uMoonL, uMoonA;   // moon phase: strength of its direct light, and of the night sky's glow (1 at full)
 uniform float uMoonPhase, uMoonR;
+uniform float uLamps, uCloudGlow;   // Sky panel: town light brightness, and how much of their glow the clouds catch
 varying vec2 vUv;
 ${COMMON}
 ${MOON_SKY}
@@ -938,20 +955,37 @@ const vec3 AMB_HI = vec3(0.040, 0.060, 0.118);
 ${WORLD}
 ${BAKED}
 ${LIGHTNING}
-// optical depth toward the moon (x) and toward the sky above (y), from the bake
-vec2 baked(vec3 p){
+// optical depth toward the moon (x) and toward the sky above (y), and how much light from
+// below gets through (z), from the bake
+vec3 baked(vec3 p){
   vec4 b = texture(uBake, vec3(p.x / TILE, p.z / TILE, (p.y - Y_MIN) / (Y_MAX - Y_MIN)));
-  return vec2(-log(max(1.0 - b.r, 2e-3)) * 4.0, -log(max(1.0 - b.g, 2e-3)) * 2.5);
+  return vec3(-log(max(1.0 - b.r, 2e-3)) * 4.0, -log(max(1.0 - b.g, 2e-3)) * 2.5, b.a);
 }
 // light reaching p: two crisp local samples, then the baked shadow beyond them.
 // Far away only the bake is read; between 55 and 80 units the two are blended.
-vec2 lightAt(vec3 p, float t){
+vec3 lightAt(vec3 p, float t){
   float f = smoothstep(55.0, 80.0, t);
-  vec2 farL = f > 0.0 ? baked(p + uMoonDir * 0.3) : vec2(0.0);
+  vec3 farL = f > 0.0 ? baked(p + uMoonDir * 0.3) : vec3(0.0);
   if (f >= 1.0) return farL;
   float od = densLight(shapeSD(p + uMoonDir * 0.15)) * 0.3 + densLight(shapeSD(p + uMoonDir * 0.45)) * 0.3;
-  vec2 b = baked(p + uMoonDir * 0.6);
-  return mix(vec2(od + b.x, b.y), farL, f);
+  vec3 b = baked(p + uMoonDir * 0.6);
+  return mix(vec3(od + b.x, b.yz), farL, f);
+}
+
+// The towns' light coming up from below the deck, scattered by the haze down there into a broad
+// glow that reaches everywhere, a little stronger in some places than others (a slow noise field
+// ~150 units across, not the town map). Only cloud with a clear way down catches it (open, from
+// the bake): the underside of the deck and the walls of its gaps. It fades quickly with height
+// above the deck's base, so it creeps a little way up the sides of a gap and no further. It is
+// stronger the less of the moon is lit: at the Sky panel's default (uCloudGlow 1) it runs from
+// 0.2 at full moon to 0.55 at new moon, in a straight line across the lit fraction, and the
+// panel's setting multiplies both ends.
+const vec3 GLOW_C = vec3(1.00, 0.21, 0.01);   // orange (redder than the lamps, as the night grade pulls it toward yellow)
+vec3 townGlow(vec3 p, float open){
+  float vary = mix(0.45, 1.25, texture(uNoise, vec3(p.xz * 0.0067, 0.71)).g);
+  float low = exp(-max(p.y - (CLOUD_BASE - 1.0), 0.0) / 2.5);
+  float byPhase = mix(0.55, 0.2, 0.5 - 0.5 * cos(uMoonPhase * 6.2831853));   // by the lit fraction
+  return GLOW_C * (uLamps * uCloudGlow * byPhase * 0.09 * vary * open * open * low);
 }
 
 float planeSpacing(float dz){
@@ -1072,7 +1106,7 @@ void main(){
       d *= 1.0 - smoothstep(tFar - 45.0, tFar - 4.0, t);
     }
     if (d > 0.004){
-      vec2 lt = lightAt(p, t);
+      vec3 lt = lightAt(p, t);
       float od = lt.x;
       float e = ph0 * exp(-od * SIG) + 0.34 * ph1 * exp(-od * SIG * 0.40) + 0.14 * ph2 * exp(-od * SIG * 0.17);
       float powder = 1.0 - exp(-max(sd, 0.0) * 2.6 - d * 0.5);
@@ -1081,6 +1115,7 @@ void main(){
       float occ = exp(-max(sd, 0.0) * 0.5) * mix(0.15, 1.0, exp(-lt.y * 0.5));
       vec3 amb = mix(AMB_LO, AMB_HI, sqrt(hgt)) * (0.28 + 0.72 * occ) * uMoonA;
       vec3 L = lightCol * (MOON_I * e * pf * uMoonL) + amb;
+      if (uCloudGlow > 0.0) L += townGlow(p, lt.z);
       if (uFlash > 0.0) L += lightningAt(p);
       float fogA = 1.0 - exp(-t * 0.016 * mix(1.0, 0.3, smoothstep(4.0, 30.0, p.y)));
       // Up close the air is a plain night blue. The sky's colour in this direction (its
@@ -1860,7 +1895,8 @@ const terA = makeTerRT(THREE.UnsignedByteType), terB = makeTerRT(THREE.UnsignedB
 const terL = makeTerRT(canFloat ? THREE.HalfFloatType : THREE.UnsignedByteType);   // town lights
 const NOCLOUDS = /[?&]noclouds\b/.test(location.search) ? 1 : 0;   // debug: show the ground alone
 const cloudPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + CLOUD_FRAG, Object.assign({
-  uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uNoClouds: { value: NOCLOUDS }, uMoonR: { value: MOON_R }
+  uNoise: { value: noiseTex }, uBake: { value: bakeTex }, uNoClouds: { value: NOCLOUDS }, uMoonR: { value: MOON_R },
+  uLamps: { value: 1 }, uCloudGlow: { value: 1 }
 }, camU, lightU, moonU));
 const groundPass = makePass((USE_TAA ? '#define PACK 1\n' : '') + GROUND_FRAG, Object.assign({
   uNoise: { value: noiseTex }, uBake: { value: bakeTex }, tCloud: { value: null },
@@ -2758,7 +2794,8 @@ function buildPanel() {
     ${row('p-glitter', 'Contrail glitter', 0, 3, 0.05, 'None', 'Strong')}
     ${foot('P sends one now', '<button type="button" id="p-reset">Reset</button><button type="button" id="p-now">Aircraft</button>')}
     <div class="sec">Ground</div>
-    ${row('s-lamps', 'Town lights', 0, 3, 0.05, 'Off', 'Bright')}`;
+    ${row('s-lamps', 'Town lights', 0, 3, 0.05, 'Off', 'Bright')}
+    ${row('s-glow', 'Glow on clouds', 0, 3, 0.05, 'None', 'Strong')}`;
 
   pane.sound = `<label class="check"><input type="checkbox" id="a-on"> Wind and thunder</label>
     ${row('a-volume', 'Volume', 0, 1, 0.01, 'Quiet', 'Loud')}
@@ -2825,7 +2862,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id.startsWith('d-')) { onFarInput(t); return; }
   if (t.id.startsWith('p-')) { onAirInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.dataset.key) grade[t.dataset.key] = parseFloat(t.value);
   else if (t.dataset.color) grade[t.dataset.color] = t.value;
@@ -3151,7 +3188,7 @@ air.next = clock + 90 + Math.random() * 150;     // the first one comes within a
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1 };
+let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 1 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
@@ -3159,6 +3196,7 @@ const sLamps = document.getElementById('s-lamps'), sLampsV = document.getElement
 const sMet = document.getElementById('s-meteors'), sMetV = document.getElementById('s-meteors-v');
 const sPhase = document.getElementById('s-phase'), sPhaseV = document.getElementById('s-phase-v');
 const sEarth = document.getElementById('s-earth'), sEarthV = document.getElementById('s-earth-v');
+const sGlow = document.getElementById('s-glow'), sGlowV = document.getElementById('s-glow-v');
 // The moon's phase, 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter. A thinner moon
 // lights the clouds and ground less: its direct light falls off faster than the lit fraction
 // (the surface itself is dimmer away from full), and the night sky's glow, which is mostly
@@ -3180,6 +3218,11 @@ function syncSky() {
   sLamps.value = sky.lamps;
   sLampsV.textContent = sky.lamps === 0 ? 'off' : '×' + (+sky.lamps).toFixed(2);
   groundPass.u.uLamps.value = sky.lamps;
+  cloudPass.u.uLamps.value = sky.lamps;
+  if (!(sky.glow >= 0 && sky.glow <= 3)) sky.glow = 1;
+  sGlow.value = sky.glow;
+  sGlowV.textContent = sky.glow === 0 ? 'off' : '×' + (+sky.glow).toFixed(2);
+  cloudPass.u.uCloudGlow.value = sky.glow;
   sMet.value = sky.meteors;
   const gap = 60 / sky.meteors;
   sMetV.textContent = sky.meteors === 0 ? 'off' : gap >= 90 ? 'every ~' + +(gap / 60).toFixed(1) + ' min' : 'every ~' + Math.round(gap) + ' s';
@@ -3197,6 +3240,7 @@ function onSkyInput(t) {
   else if (t.id === 's-lamps') sky.lamps = parseFloat(t.value);
   else if (t.id === 's-phase') sky.phase = parseFloat(t.value);
   else if (t.id === 's-earth') sky.earth = parseFloat(t.value);
+  else if (t.id === 's-glow') sky.glow = parseFloat(t.value);
   else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
