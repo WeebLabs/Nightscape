@@ -2593,8 +2593,13 @@ function startFlash(kind, opts) {
   thunder(ev);
   return { kind: ev.deep ? 'deep' : ev.kind, at: ev.centre.map(v => +v.toFixed(1)), visible: +ev.vis.toFixed(2), strokes: ev.strokes.length, segments: boltMesh ? boltMesh.geometry.index.count / 6 : 0 };
 }
-// roughly two in three flashes are buried deep in the cloud, one in five strikes the sea
-function pickKind() { const r = rnd(); return r < 0.65 ? 'deep' : r < 0.85 ? 'cg' : 'ic'; }
+// What kind of flash: by default roughly two in three are buried deep in the cloud and one in
+// five strikes the ground or sea. The scene sets the share of ground strikes (sky.strikes, 0.2 by
+// default); the rest keep their proportions to each other.
+function pickKind() {
+  const c = sky.strikes, r = rnd(), deep = 0.65 * (1 - c) / 0.8;
+  return r < deep ? 'deep' : r < deep + c ? 'cg' : 'ic';
+}
 function endFlash() {
   flash = null;
   setBoltMesh(null);
@@ -2856,22 +2861,22 @@ let grade = Object.assign({ preset: GRADE_DEFAULT, changed: false }, gradeValues
 // is never overwritten by changes elsewhere. A scene's grade is its own, though: changing the
 // grade in a scene changes it for that scene alone, and Revert returns a built-in scene to the
 // grade it came with.
-const SCENE_KEYS = ['phase', 'alt', 'az', 'earth', 'eclipse', 'lamps', 'glow', 'lightRed', 'boltWarm'];
+const SCENE_KEYS = ['phase', 'alt', 'az', 'earth', 'eclipse', 'lamps', 'glow', 'lightRed', 'boltWarm', 'strikes'];
 const SCENES = [
   { id: 'moonlit', name: 'Moonlit Night', grade: 'Teal Night', about: 'A full moon 12° up, ahead and a little to the left.',
-    v: { phase: 0.5, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0 } },
+    v: { phase: 0.5, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
   { id: 'moonrise', name: 'Moonrise', grade: 'Ember', about: 'A full moon just clearing the horizon, dusky red through the thick air.',
-    v: { phase: 0.5, alt: 1.5, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0 } },
+    v: { phase: 0.5, alt: 1.5, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
   { id: 'golden', name: 'Golden Moon', grade: 'Golden Moon', about: 'A low full moon, turned gold, with long shadows across the clouds.',
-    v: { phase: 0.5, alt: 2.5, az: 4, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0 } },
+    v: { phase: 0.5, alt: 2.5, az: 4, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
   { id: 'high', name: 'High Moon', grade: 'Moonlit Blue', about: 'A full moon high overhead, cool and bright, lighting the cloud tops from above.',
-    v: { phase: 0.5, alt: 24, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0 } },
+    v: { phase: 0.5, alt: 24, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
   { id: 'crescent', name: 'Crescent', grade: 'Deep Sea', about: 'A thin waxing crescent, its dark part lit by a strong earthshine.',
-    v: { phase: 0.12, alt: 8, az: MOON_AZ0, earth: 2, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0 } },
+    v: { phase: 0.12, alt: 8, az: MOON_AZ0, earth: 2, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
   { id: 'blood', name: 'Blood Moon', grade: 'Blood', about: 'An eclipse: the full moon turned blood red in Earth\'s shadow, and the clouds lit crimson from the towns below.',
-    v: { phase: 0.5, alt: 6, az: 5, earth: 0.7, lamps: 2.2, glow: 2.0, eclipse: 0.88, lightRed: 1, boltWarm: 1 } },
+    v: { phase: 0.5, alt: 6, az: 5, earth: 0.7, lamps: 2.2, glow: 2.0, eclipse: 0.88, lightRed: 1, boltWarm: 1, strikes: 0.6 } },
   { id: 'newmoon', name: 'New Moon', grade: 'Sodium', about: 'No moon: the stars, and the towns glowing orange on the clouds from below.',
-    v: { phase: 0, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0 } }
+    v: { phase: 0, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } }
 ];
 let scn = null;   // the viewer's scenes (loaded with the sky settings; see loadScenes)
 
@@ -2938,6 +2943,7 @@ function buildPanel() {
     ${row('w-rate', 'Storm activity', 0.25, 3, 0.05, 'Rare', 'Frequent')}
     ${row('w-gap', 'Minimum gap', 0, 1, 0.01, 'Bursts', '3 min')}
     ${row('s-boltwarm', 'Colour', 0, 1, 0.01, 'Blue-white', 'Pale gold')}
+    ${row('s-strikes', 'Ground strikes', 0, 1, 0.05, 'None', 'Every flash')}
     ${foot('L sends a flash now', '<button type="button" id="w-now">Flash now</button>')}
     <div class="sec">Distant storms</div>
     ${row('d-rate', 'How often', 0, 12, 0.25, 'Off', 'Often')}
@@ -3107,7 +3113,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id.startsWith('d-')) { onFarInput(t); return; }
   if (t.id.startsWith('p-')) { onAirInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az' || t.id === 's-eclipse' || t.id === 's-lightred' || t.id === 's-boltwarm') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az' || t.id === 's-eclipse' || t.id === 's-lightred' || t.id === 's-boltwarm' || t.id === 's-strikes') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.id === 'g-save-name') { checkSaveName(); return; }
   if (t.id === 'sc-keep-name') { checkKeepName(); return; }
@@ -3465,7 +3471,7 @@ air.next = clock + 90 + Math.random() * 150;     // the first one comes within a
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 0.85, alt: MOON_ALT0, az: MOON_AZ0, eclipse: 0, lightRed: 0, boltWarm: 0 };
+let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 0.85, alt: MOON_ALT0, az: MOON_AZ0, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
@@ -3477,6 +3483,7 @@ const sGlow = document.getElementById('s-glow'), sGlowV = document.getElementByI
 const sEcl = document.getElementById('s-eclipse'), sEclV = document.getElementById('s-eclipse-v');
 const sLRed = document.getElementById('s-lightred'), sLRedV = document.getElementById('s-lightred-v');
 const sBolt = document.getElementById('s-boltwarm'), sBoltV = document.getElementById('s-boltwarm-v');
+const sStrikes = document.getElementById('s-strikes'), sStrikesV = document.getElementById('s-strikes-v');
 // Lightning's colour (w 0 blue-white, as it has always been, to 1 pale gold): the light a flash
 // casts on the clouds, ground and sky, and the channel itself. Its white-hot core stays near white.
 // Each colour is kept at the blue-white one's luminance, so a flash is as bright whatever its colour.
@@ -3612,6 +3619,9 @@ function syncSky() {
   sBolt.value = sky.boltWarm;
   sBoltV.textContent = sky.boltWarm === 0 ? 'blue-white' : sky.boltWarm >= 1 ? 'pale gold' : Math.round(sky.boltWarm * 100) + '% gold';
   setBoltColour(+sky.boltWarm);
+  if (!(sky.strikes >= 0 && sky.strikes <= 1)) sky.strikes = 0.2;
+  sStrikes.value = sky.strikes;
+  sStrikesV.textContent = sky.strikes === 0 ? 'none' : sky.strikes >= 1 ? 'every flash' : Math.round(sky.strikes * 100) + '% of flashes';
 }
 function onSkyInput(t) {
   if (t.id === 's-twinkle') sky.twinkle = parseFloat(t.value);
@@ -3622,6 +3632,7 @@ function onSkyInput(t) {
   else if (t.id === 's-eclipse') sky.eclipse = parseFloat(t.value);
   else if (t.id === 's-lightred') sky.lightRed = parseFloat(t.value);
   else if (t.id === 's-boltwarm') sky.boltWarm = parseFloat(t.value);
+  else if (t.id === 's-strikes') sky.strikes = parseFloat(t.value);
   else if (t.id === 's-alt' || t.id === 's-az') {
     if (t.id === 's-alt') sky.alt = parseFloat(t.value); else sky.az = parseFloat(t.value);
     // back on the default's slider step: exactly the default, so it looks exactly as it did
@@ -3633,7 +3644,7 @@ function onSkyInput(t) {
   else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
-  if (/^s-(phase|alt|az|earth|eclipse|lamps|glow|lightred|boltwarm)$/.test(t.id)) sceneEdited();
+  if (/^s-(phase|alt|az|earth|eclipse|lamps|glow|lightred|boltwarm|strikes)$/.test(t.id)) sceneEdited();
   syncSky();
 }
 
