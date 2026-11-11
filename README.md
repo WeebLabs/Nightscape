@@ -112,7 +112,7 @@ Press `G` or click the corner button to open the panel. Its settings are organis
 
 ### Scene
 
-A scene is the look of one moment: the moon's phase, height and direction, its earthshine and any eclipse, the town lights, their colour and their glow on the clouds, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
+A scene is the look of one moment: the moon's phase, height and direction, its earthshine and any eclipse, the town lights, their colour and their glow on the clouds, the colour of the lightning, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
 
 | Scene | Moon | Grade |
 | --- | --- | --- |
@@ -121,10 +121,10 @@ A scene is the look of one moment: the moon's phase, height and direction, its e
 | **Golden Moon** | Full, 2.5° up and 4° right, gold | Golden Moon |
 | **High Moon** | Full, 24° up, cool and bright | Moonlit Blue |
 | **Crescent** | A thin waxing crescent 8° up, with strong earthshine | Deep Sea |
-| **Blood Moon** | Full and 88% eclipsed, 6° up and 5° right: deep red, brightening to copper toward the edge of Earth's shadow, with the clouds lit crimson from the towns below | Blood |
+| **Blood Moon** | Full and 88% eclipsed, 6° up and 5° right: deep red, brightening to copper toward the edge of Earth's shadow, with the clouds lit crimson from the towns below and pale gold lightning | Blood |
 | **New Moon** | None: the stars, and the towns' orange glow on the clouds | Sodium |
 
-The built-in scenes never change. Changing any of their settings, in the Sky tab, carries the scene into one unsaved scene, shown in italics as **Custom**, and continues there. There is only ever one: changing a different built-in scene replaces it. **Keep…** names it and saves it as a scene of your own, with its grade, and **Discard** drops it and returns to the built-in scene it came from. **+** keeps whatever is on screen straight away as a new scene of your own. Your own scenes are shown with a dashed outline. Each keeps every change made while it is active, is never changed by anything done elsewhere, and can be deleted with a second click to confirm.
+The built-in scenes never change. Changing any of their settings, in the Sky tab or the lightning colour in the Weather tab, carries the scene into one unsaved scene, shown in italics as **Custom**, and continues there. There is only ever one: changing a different built-in scene replaces it. **Keep…** names it and saves it as a scene of your own, with its grade, and **Discard** drops it and returns to the built-in scene it came from. **+** keeps whatever is on screen straight away as a new scene of your own. Your own scenes are shown with a dashed outline. Each keeps every change made while it is active, is never changed by anything done elsewhere, and can be deleted with a second click to confirm.
 
 Each scene has its own grade. Changing the grade while in a scene changes it for that scene alone. **Revert** returns a built-in scene to the grade it came with.
 
@@ -174,6 +174,7 @@ A library profile only changes when you save to it, so changing the grade in a s
 | Lightning in the storm clouds | On or off | On | Turns automatic lightning on or off |
 | Storm activity | ×0.25 to ×3 | ×0.25 | How often lightning flashes. The average wait between flashes is 9 seconds divided by this value, and never less than 2.5 seconds |
 | Minimum gap | 2.5 s to 3 min, logarithmic | 40 s | The shortest quiet spell before lightning can flash again, the first flash after loading included. At the far left, storms may flash in quick bursts, with a 30% chance of a follow-up flash within about two seconds. Any higher setting turns bursts off, so the gap holds between every pair of flashes |
+| Colour | Blue-white to pale gold | Blue-white | The colour of the lightning: the light a flash casts on the clouds, ground and sky, and the glow around the channel. The channel's core stays near white, and a flash is equally bright at any colour. It belongs to the scene, so changing it carries a built-in scene into **Custom**. Blood Moon uses pale gold |
 | Flash now | Button | | Sends a flash immediately, like `L`. It ignores the minimum gap |
 
 **Distant storms**
@@ -278,7 +279,7 @@ All settings are saved per browser in `localStorage`, under these keys:
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
-| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, eclipse, height and direction, twinkle, star reach, shooting star rate, town light brightness and colour, and their glow on the clouds |
+| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, eclipse, height and direction, twinkle, star reach, shooting star rate, town light brightness and colour, their glow on the clouds, and the lightning colour |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
 | `moonlit-cloud-sea:tab` | The settings tab you used last |
