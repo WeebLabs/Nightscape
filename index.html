@@ -1505,6 +1505,11 @@ uniform vec3 uConA, uConB;   // its contrail as a straight segment, oldest end t
 uniform vec4 uCon;           // the contrail's age at A and at B (seconds), its fade time, its brightness
 uniform float uGlitter;      // how much the contrail's ice crystals glint
 uniform sampler2D uMoonMap;
+uniform sampler2D tDepth;    // this frame's cloud pass with its depth (see PACK), to hide crows behind cloud
+uniform float uCrowN;        // how many crows are up (0: none, and none of their work is done)
+uniform vec4 uCrowBox;       // the screen rectangle (pixels) they are all inside
+uniform vec4 uCrowA[24];     // each crow: centre (pixels), half wingspan (pixels), wingtip height (fraction of the half span)
+uniform vec4 uCrowB[24];     // its bank (radians), its distance
 uniform vec3 uBalance, uShadowTint, uHighTint;
 uniform float uShadowAmt, uHighAmt, uLift, uSat, uContrast, uVignette, uGrain, uRays;
 varying vec2 vUv;
@@ -1716,6 +1721,37 @@ vec3 moonDisk(vec3 rd, vec3 m){
 
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 
+// Crows, as black silhouettes (only seen against something bright: the moon, its glow, lit cloud).
+// Each is drawn in its own frame, half wingspan 1: a small body, a wedge of tail, and two broad
+// wings tapering to the tips, bent up or down by the wingbeat. Returns how much of this pixel the
+// nearest crow covers, and that crow's distance.
+float crowShape(vec2 q, float flap, float aa){
+  float ax = abs(q.x);
+  float body = length(q / vec2(0.15, 0.11)) - 1.0;
+  body *= 0.11;
+  float tail = max(abs(q.x) - (0.05 + 0.35 * (-0.06 - q.y)), max(q.y + 0.06, -0.34 - q.y));
+  float cy = flap * pow(ax, 1.5) - 0.04 * ax;                        // the wing's line, bent by the beat
+  float th = mix(0.10, 0.03, ax) * (1.0 - 0.25 * smoothstep(0.7, 1.0, ax) * step(0.5, fract(ax * 18.0)));   // ragged tips
+  float wing = max(abs(q.y - cy) - th, ax - 1.0);
+  float d = min(min(body, tail), wing);
+  return clamp(0.5 - d / aa, 0.0, 1.0);
+}
+float crows(vec2 px, out float dist){
+  float cov = 0.0;
+  dist = 1e9;
+  for (int i = 0; i < 24; i++){
+    if (float(i) >= uCrowN) break;
+    vec4 A = uCrowA[i];
+    vec2 d = px - A.xy;
+    if (dot(d, d) > A.z * A.z * 1.3) continue;
+    float cb = cos(uCrowB[i].x), sb = sin(uCrowB[i].x);
+    vec2 q = vec2(cb * d.x + sb * d.y, cb * d.y - sb * d.x) / A.z;
+    float k = crowShape(q, A.w, 1.0 / A.z) * min(A.z / 1.2, 1.0);   // a speck fades rather than flickers
+    if (k > cov){ cov = k; dist = uCrowB[i].y; }
+  }
+  return cov;
+}
+
 void main(){
   vec2 o = uCloudTexel * 0.75;
   vec4 c = texture2D(tCloud, vUv) * 0.5
@@ -1776,6 +1812,17 @@ void main(){
   float rayMask = 1.0 - smoothstep(uMoonR - uPixAng * 1.2, uMoonR + uPixAng * 0.6, am);
   float rayLit = rayMask > 0.0 ? moonLitAt(rd, m) : 1.0;
   col += rays * vec3(0.74, 0.80, 0.95) * uMoonDiskTint * 0.6 * uRays * uMoonL * (1.0 - 0.8 * rayMask * rayLit * c.a);
+  // crows in front of all of it, unless cloud is nearer than the crow (then only what shows through)
+  if (uCrowN > 0.0 && all(greaterThan(gl_FragCoord.xy, uCrowBox.xy)) && all(lessThan(gl_FragCoord.xy, uCrowBox.zw))){
+    float cd;
+    float cov = crows(gl_FragCoord.xy, cd);
+    if (cov > 0.0){
+      vec4 g = texture2D(tDepth, vUv);
+      float gd = floor(g.a) / 32.0;
+      cov *= cd < gd + 0.5 ? 1.0 : c.a;
+      col = mix(col, vec3(0.0016, 0.0007, 0.0007), cov);   // near black, a trace of the red below
+    }
+  }
 
   // ---- colour grade (all of it driven from the panel) ----
   const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
@@ -2000,7 +2047,9 @@ const compPass = makePass(COMPOSITE_FRAG, Object.assign({
   tBolt: { value: null }, uBoltOn: { value: 0 }, uSkyFlash: { value: new THREE.Vector3() }, uFlashDir: { value: new THREE.Vector3(0, 1, 0) },
   uFar: { value: new THREE.Vector4(0, 0, -1, 0) }, uFarShape: { value: new THREE.Vector3(0.1, 0, 0.04) }, uFarCol: { value: new THREE.Vector4(1, 0.84, 0.74, 1) },
   uAirOn: { value: 0 }, uAirW: { value: new THREE.Vector3(0, 1, 0) }, uAirR: { value: new THREE.Vector3(0, 1, 0) }, uAirG: { value: new THREE.Vector3(0, 1, 0) },
-  uAirI: { value: new THREE.Vector3() }, uConA: { value: new THREE.Vector3() }, uConB: { value: new THREE.Vector3() }, uCon: { value: new THREE.Vector4(0, 0, 150, 0) }, uGlitter: { value: 1 }
+  uAirI: { value: new THREE.Vector3() }, uConA: { value: new THREE.Vector3() }, uConB: { value: new THREE.Vector3() }, uCon: { value: new THREE.Vector4(0, 0, 150, 0) }, uGlitter: { value: 1 },
+  tDepth: { value: null }, uCrowN: { value: 0 }, uCrowBox: { value: new THREE.Vector4() },
+  uCrowA: { value: Array.from({ length: 24 }, () => new THREE.Vector4()) }, uCrowB: { value: Array.from({ length: 24 }, () => new THREE.Vector4()) }
 }, camU, moonU));
 
 // NASA LRO lunar albedo map (public domain), 512 x 256, embedded
@@ -2695,6 +2744,7 @@ function render(dt) {
   updateMeteor(dt);
   updateFar(dt);
   updateAircraft();
+  updateCrows(h * DPR);
   updateSound();
 
   // moon position on screen for the light shafts
@@ -2750,6 +2800,7 @@ function render(dt) {
   }
   compPass.u.tCloud.value = clouds.texture;
   compPass.u.tRays.value = raysRT.texture;
+  compPass.u.tDepth.value = groundRT.texture;
   renderer.setRenderTarget(null);
   renderer.render(compPass.scene, quadCam);
 }
@@ -2861,22 +2912,22 @@ let grade = Object.assign({ preset: GRADE_DEFAULT, changed: false }, gradeValues
 // is never overwritten by changes elsewhere. A scene's grade is its own, though: changing the
 // grade in a scene changes it for that scene alone, and Revert returns a built-in scene to the
 // grade it came with.
-const SCENE_KEYS = ['phase', 'alt', 'az', 'earth', 'eclipse', 'lamps', 'glow', 'lightRed', 'boltWarm', 'strikes'];
+const SCENE_KEYS = ['phase', 'alt', 'az', 'earth', 'eclipse', 'lamps', 'glow', 'lightRed', 'boltWarm', 'strikes', 'meteors', 'crows'];
 const SCENES = [
   { id: 'moonlit', name: 'Moonlit Night', grade: 'Teal Night', about: 'A full moon 12° up, ahead and a little to the left.',
-    v: { phase: 0.5, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
+    v: { phase: 0.5, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, meteors: 2, crows: 0 } },
   { id: 'moonrise', name: 'Moonrise', grade: 'Ember', about: 'A full moon just clearing the horizon, dusky red through the thick air.',
-    v: { phase: 0.5, alt: 1.5, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
+    v: { phase: 0.5, alt: 1.5, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, meteors: 2, crows: 0 } },
   { id: 'golden', name: 'Golden Moon', grade: 'Golden Moon', about: 'A low full moon, turned gold, with long shadows across the clouds.',
-    v: { phase: 0.5, alt: 2.5, az: 4, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
+    v: { phase: 0.5, alt: 2.5, az: 4, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, meteors: 2, crows: 0 } },
   { id: 'high', name: 'High Moon', grade: 'Moonlit Blue', about: 'A full moon high overhead, cool and bright, lighting the cloud tops from above.',
-    v: { phase: 0.5, alt: 24, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
+    v: { phase: 0.5, alt: 24, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, meteors: 2, crows: 0 } },
   { id: 'crescent', name: 'Crescent', grade: 'Deep Sea', about: 'A thin waxing crescent, its dark part lit by a strong earthshine.',
-    v: { phase: 0.12, alt: 8, az: MOON_AZ0, earth: 2, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } },
+    v: { phase: 0.12, alt: 8, az: MOON_AZ0, earth: 2, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, meteors: 2, crows: 0 } },
   { id: 'blood', name: 'Blood Moon', grade: 'Blood', about: 'An eclipse: the full moon turned blood red in Earth\'s shadow, and the clouds lit crimson from the towns below.',
-    v: { phase: 0.5, alt: 6, az: 5, earth: 0.7, lamps: 2.2, glow: 2.0, eclipse: 0.88, lightRed: 1, boltWarm: 1, strikes: 0.6 } },
+    v: { phase: 0.5, alt: 6, az: 5, earth: 0.7, lamps: 2.2, glow: 2.0, eclipse: 0.88, lightRed: 1, boltWarm: 1, strikes: 0.6, meteors: 0, crows: 15 } },
   { id: 'newmoon', name: 'New Moon', grade: 'Sodium', about: 'No moon: the stars, and the towns glowing orange on the clouds from below.',
-    v: { phase: 0, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 } }
+    v: { phase: 0, alt: MOON_ALT0, az: MOON_AZ0, earth: 1, lamps: 1.95, glow: 0.85, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, meteors: 2, crows: 0 } }
 ];
 let scn = null;   // the viewer's scenes (loaded with the sky settings; see loadScenes)
 
@@ -2977,6 +3028,9 @@ function buildPanel() {
     ${row('p-fade', 'Contrail lasts', 0.3, 3, 0.05, 'Short', 'Long')}
     ${row('p-glitter', 'Contrail glitter', 0, 3, 0.05, 'None', 'Strong')}
     ${foot('P sends one now', '<button type="button" id="p-reset">Reset</button><button type="button" id="p-now">Aircraft</button>')}
+    <div class="sec">Crows</div>
+    ${row('s-crows', 'How often', 0, 60, 1, 'Off', 'Rarely')}
+    ${foot('C sends a flock now', '<button type="button" id="s-crows-now">Crows</button>')}
     <div class="sec">Ground</div>
     ${row('s-lamps', 'Town lights', 0, 3, 0.05, 'Off', 'Bright')}
     ${row('s-glow', 'Glow on clouds', 0, 3, 0.05, 'None', 'Strong')}
@@ -3113,7 +3167,7 @@ gradeBody.addEventListener('input', e => {
   if (t.id === 'w-on' || t.id === 'w-rate' || t.id === 'w-gap') { onStormInput(t); return; }
   if (t.id.startsWith('d-')) { onFarInput(t); return; }
   if (t.id.startsWith('p-')) { onAirInput(t); return; }
-  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az' || t.id === 's-eclipse' || t.id === 's-lightred' || t.id === 's-boltwarm' || t.id === 's-strikes') { onSkyInput(t); return; }
+  if (t.id === 's-twinkle' || t.id === 's-low' || t.id === 's-lamps' || t.id === 's-meteors' || t.id === 's-phase' || t.id === 's-earth' || t.id === 's-glow' || t.id === 's-alt' || t.id === 's-az' || t.id === 's-eclipse' || t.id === 's-lightred' || t.id === 's-boltwarm' || t.id === 's-strikes' || t.id === 's-crows') { onSkyInput(t); return; }
   if (t.id.startsWith('a-')) { onSoundInput(t); return; }
   if (t.id === 'g-save-name') { checkSaveName(); return; }
   if (t.id === 'sc-keep-name') { checkKeepName(); return; }
@@ -3133,6 +3187,7 @@ gradeBody.addEventListener('click', e => {
   if (b.id === 'p-now') { airNow(); return; }
   if (b.id === 'p-reset') { resetAir(); return; }
   if (b.id === 's-met-now') { launchMeteor(); return; }
+  if (b.id === 's-crows-now') { launchCrows(); return; }
   if (b.dataset.preset) { selectProfile(b.dataset.preset); return; }
   if (b.dataset.scene) { pickScene(b.dataset.scene); return; }
   if (b.id === 'sc-add') { addScene(); return; }
@@ -3181,6 +3236,7 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'l' || e.key === 'L') flashNow();
   if (e.key === 'm' || e.key === 'M') launchMeteor();
   if (e.key === 'p' || e.key === 'P') airNow();
+  if (e.key === 'c' || e.key === 'C') launchCrows();
   if (e.key === 's' || e.key === 'S') { if (sound.on && !soundLive()) startSound(); else setSoundOn(!sound.on); }
 });
 // show the controls once the scene is up; hide cursor and closed button when idle
@@ -3442,6 +3498,88 @@ function updateAircraft() {
   u.uAirOn.value = 1;
 }
 function airNow() { if (!baked) return; air.on = false; launchAircraft(); }
+
+/* ---------------------------------------------------------------------------
+   Crows: at the scene's rate (by default only in Blood Moon, every 15 minutes or so;
+   each wait is random, between 75% and 125% of that), or sent with C. Crows come in
+   from all round the edges of the
+   view, each from just outside the frame, and converge into a
+   loose flock that flies on out toward the moon, crossing in front of it and shrinking
+   into specks. They are black silhouettes, so they show only against the moon, its glow,
+   the sky and lit cloud. Positions are kept relative to the camera, so the flock keeps
+   ahead of us.
+--------------------------------------------------------------------------- */
+const CROW_N = 24, CROW_SPAN = 0.11;   // how many, and half a wingspan in world units
+const crowF = { on: false, t0: 0, birds: [], next: Infinity };
+function crowGap() { return sky.crows > 0 ? sky.crows * 60 * (0.75 + 0.5 * Math.random()) : Infinity; }
+const _cv = new THREE.Vector3(), _cmR = new THREE.Vector3(), _cmU = new THREE.Vector3();
+function launchCrows() {
+  if (!baked) return;
+  crowF.birds = [];
+  const F = camU.uCamF.value, R = camU.uCamR.value, U = camU.uCamU.value;
+  const tH = camU.uTanHalf.value, asp = camU.uAspect.value;
+  for (let i = 0; i < CROW_N; i++) {
+    // where it starts: just outside the frame, round its left, top and right edges (not the bottom,
+    // which is cloud close below us), 3 to 7 units off
+    const ph = (-0.2 + 1.4 * Math.random()) * Math.PI;
+    const x = Math.cos(ph), y = Math.sin(ph);
+    const m = (1.08 + 0.2 * Math.random()) / Math.max(Math.abs(x), Math.abs(y));   // onto the edge, then a little past it
+    const S = new THREE.Vector3().copy(F).addScaledVector(R, x * m * tH * asp).addScaledVector(U, y * m * tH)
+      .normalize().multiplyScalar(3 + Math.random() * 4);
+    crowF.birds.push({
+      S, T: 3.5 + Math.random() * 3.5,                                                                               // start, and time to join the flock
+      a: (Math.random() * 2 - 1) * 1.3, b: (Math.random() * 2 - 1) * 0.45, c: (Math.random() * 2 - 1) * 2.2,   // place in the flock
+      f: 3.2 + Math.random() * 1.2, ph: Math.random() * 6.283,                                                  // wingbeat
+      g: Math.random() * 6.283, w: 0.5 + Math.random() * 0.6, wp: Math.random() * 6.283                         // gliding, wandering
+    });
+  }
+  Object.assign(crowF, { on: true, t0: clock });
+  crowF.next = Infinity;   // (the next is timed from when this flock has gone)
+}
+function updateCrows(hPix) {
+  const u = compPass.u;
+  if (!crowF.on) {
+    u.uCrowN.value = 0;
+    if (!DBG && clock >= crowF.next) launchCrows();
+    if (!crowF.on) return;
+  }
+  const t = clock - crowF.t0;
+  // how far out along the line to the moon the flock has got: from just ahead of us to 95 units
+  const r0 = 3 + 0.45 * t + 0.035 * t * t;
+  if (r0 > 95) { crowF.on = false; u.uCrowN.value = 0; crowF.next = clock + crowGap(); return; }
+  const F = camU.uCamF.value, R = camU.uCamR.value, U = camU.uCamU.value;
+  const tH = camU.uTanHalf.value, asp = camU.uAspect.value, W = hPix * asp;
+  _cmR.crossVectors(MOON_DIR, _cv.set(0, 1, 0)).normalize();
+  _cmU.crossVectors(_cmR, MOON_DIR);
+  let n = 0, x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const b of crowF.birds) {
+    const r = r0 + b.c;
+    const spread = 0.7 + 0.035 * Math.max(r, 0);
+    // its place in the flock on the line to the moon, wandering a little...
+    const v = _cv.copy(MOON_DIR).multiplyScalar(r)
+      .addScaledVector(_cmR, b.a * spread + 0.3 * Math.sin(t * 0.45 * b.w + b.wp * 2))
+      .addScaledVector(_cmU, b.b * spread + 0.25 * Math.sin(t * 0.6 * b.w + b.wp) * b.w);
+    // ...which it reaches from where it started, quickly at first and settling into place
+    const e = Math.min(t / b.T, 1), k = 1 - (1 - e) * (1 - e) * (1 - e);
+    v.multiplyScalar(k).addScaledVector(b.S, 1 - k);
+    // a steady wingbeat with now and then a glide, wings held a little up
+    const glide = Math.min(Math.max((Math.sin(t * 0.7 + b.g) - 0.55) * 4, 0), 1);
+    const beat = Math.sin(t * b.f * 6.283 + b.ph);
+    const flap = (1 - glide) * 0.55 * beat + glide * 0.12;
+    const dist = v.length();
+    const z = v.dot(F);
+    if (z < 0.25) continue;
+    const sx = (0.5 + 0.5 * v.dot(R) / (z * tH * asp)) * W, sy = (0.5 + 0.5 * v.dot(U) / (z * tH)) * hPix;
+    const half = CROW_SPAN / (z * tH) * hPix * 0.5;
+    if (sx < -half || sx > W + half || sy < -half || sy > hPix + half) continue;
+    u.uCrowA.value[n].set(sx, sy, half, flap);
+    u.uCrowB.value[n].set(0.18 * Math.sin(t * 0.9 + b.wp), dist, 0, 0);
+    x0 = Math.min(x0, sx - half); x1 = Math.max(x1, sx + half); y0 = Math.min(y0, sy - half); y1 = Math.max(y1, sy + half);
+    if (++n >= CROW_N) break;
+  }
+  u.uCrowN.value = n;
+  u.uCrowBox.value.set(x0 - 2, y0 - 2, x1 + 2, y1 + 2);
+}
 const AIR_READ = {
   every: v => v === 0 ? 'off' : 'every ~' + v + ' min',
   lights: v => '×' + v.toFixed(2),
@@ -3471,12 +3609,13 @@ air.next = clock + 90 + Math.random() * 150;     // the first one comes within a
    and how bright the town lights are, saved per viewer
 --------------------------------------------------------------------------- */
 const SKY_STORE = 'moonlit-cloud-sea:sky:v1';
-let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 0.85, alt: MOON_ALT0, az: MOON_AZ0, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2 };
+let sky = { twinkle: 1.4, low: 0.035, lamps: 1.95, meteors: 2, phase: 0.5, earth: 1, glow: 0.85, alt: MOON_ALT0, az: MOON_AZ0, eclipse: 0, lightRed: 0, boltWarm: 0, strikes: 0.2, crows: 0 };
 try { const k = JSON.parse(localStorage.getItem(SKY_STORE) || 'null'); if (k && k.twinkle >= 0 && k.low >= 0) sky = Object.assign(sky, k); } catch (e) {}
 const sTw = document.getElementById('s-twinkle'), sTwV = document.getElementById('s-twinkle-v');
 const sLow = document.getElementById('s-low'), sLowV = document.getElementById('s-low-v');
 const sLamps = document.getElementById('s-lamps'), sLampsV = document.getElementById('s-lamps-v');
 const sMet = document.getElementById('s-meteors'), sMetV = document.getElementById('s-meteors-v');
+const sCrows = document.getElementById('s-crows'), sCrowsV = document.getElementById('s-crows-v');
 const sPhase = document.getElementById('s-phase'), sPhaseV = document.getElementById('s-phase-v');
 const sEarth = document.getElementById('s-earth'), sEarthV = document.getElementById('s-earth-v');
 const sGlow = document.getElementById('s-glow'), sGlowV = document.getElementById('s-glow-v');
@@ -3592,6 +3731,9 @@ function syncSky() {
   sMet.value = sky.meteors;
   const gap = 60 / sky.meteors;
   sMetV.textContent = sky.meteors === 0 ? 'off' : gap >= 90 ? 'every ~' + +(gap / 60).toFixed(1) + ' min' : 'every ~' + Math.round(gap) + ' s';
+  if (!(sky.crows >= 0 && sky.crows <= 60)) sky.crows = 0;
+  sCrows.value = sky.crows;
+  sCrowsV.textContent = sky.crows === 0 ? 'off' : 'every ~' + sky.crows + ' min';
   if (!(sky.phase >= 0 && sky.phase <= 1)) sky.phase = 0.5;
   sPhase.value = sky.phase;
   const lit = setMoonPhase(+sky.phase);
@@ -3642,9 +3784,10 @@ function onSkyInput(t) {
     clearTimeout(moonMoveTimer); moonMoveTimer = setTimeout(requestMoonBake, 300);
   }
   else if (t.id === 's-meteors') { sky.meteors = parseFloat(t.value); met.next = clock + meteorGap(); }
+  else if (t.id === 's-crows') { sky.crows = parseFloat(t.value); if (!crowF.on) crowF.next = clock + crowGap(); }
   else sky.low = parseFloat(t.value);
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
-  if (/^s-(phase|alt|az|earth|eclipse|lamps|glow|lightred|boltwarm|strikes)$/.test(t.id)) sceneEdited();
+  if (/^s-(phase|alt|az|earth|eclipse|lamps|glow|lightred|boltwarm|strikes|meteors|crows)$/.test(t.id)) sceneEdited();
   syncSky();
 }
 
@@ -3763,6 +3906,8 @@ function applyScene() {
   for (const k of SCENE_KEYS) sky[k] = v[k];
   try { localStorage.setItem(SKY_STORE, JSON.stringify(sky)); } catch (e) {}
   syncSky();
+  met.next = clock + meteorGap();   // (the scene's own rate of shooting stars, none in Blood Moon)
+  if (!crowF.on) crowF.next = clock + crowGap();   // (and of crows, only in Blood Moon)
   showSaveRow(false); showKeepRow(false);
   loadSceneGrade();
   renderScenes();
@@ -4074,6 +4219,7 @@ window.__cloudScene = {
   airState: () => air.on ? { clock: +clock.toFixed(2), t: +(clock - air.t0).toFixed(1), w: compPass.u.uAirW.value.toArray().map(v => +v.toFixed(3)), dist: Math.round(_ar.length()), I: compPass.u.uAirI.value.toArray() } : null,
   farState: () => ({ on: far.on, u: compPass.u.uFar.value.toArray(), shape: compPass.u.uFarShape.value.toArray(), inShader: !!compPass.u.uFar }),
   // testing: start a flash of a given kind ('cg', 'ic' or 'crawl'), optionally frozen at an age in seconds
+  crows: () => { launchCrows(); return crowF.on; },
   strike: (kind, hold) => { if (flash) endFlash(); return startFlash(kind || 'cg', { hold }); },
   holdFlash: age => { if (flash) flash.hold = age; },
   storms: () => CBS.map(c => ({ x: +c.cx.toFixed(1), z: +c.cz.toFixed(1), R0: +c.R0.toFixed(1), H: +c.H.toFixed(1),

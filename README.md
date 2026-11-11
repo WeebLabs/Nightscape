@@ -100,6 +100,7 @@ Settings you choose in the panel are saved in that browser's local storage. A wa
 | `Shift`+`L` | Sends a distant storm flash now, each time from a new position |
 | `M` | Sends a shooting star now |
 | `P` | Sends an aircraft now |
+| `C` | Sends a flock of crows now |
 | `S` | Turns sound on or off. If sound is on but has not started yet, it starts it |
 
 In the settings panel, the left and right arrow keys move between tabs when a tab has keyboard focus, and `Home` and `End` jump to the first and last tab. The other keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
@@ -112,7 +113,7 @@ Press `G` or click the corner button to open the panel. Its settings are organis
 
 ### Scene
 
-A scene is the look of one moment: the moon's phase, height and direction, its earthshine and any eclipse, the town lights, their colour and their glow on the clouds, the colour of the lightning and how often it strikes the ground, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
+A scene is the look of one moment: the moon's phase, height and direction, its earthshine and any eclipse, the town lights, their colour and their glow on the clouds, the colour of the lightning and how often it strikes the ground, how often shooting stars fall and crows fly past, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
 
 | Scene | Moon | Grade |
 | --- | --- | --- |
@@ -121,7 +122,7 @@ A scene is the look of one moment: the moon's phase, height and direction, its e
 | **Golden Moon** | Full, 2.5° up and 4° right, gold | Golden Moon |
 | **High Moon** | Full, 24° up, cool and bright | Moonlit Blue |
 | **Crescent** | A thin waxing crescent 8° up, with strong earthshine | Deep Sea |
-| **Blood Moon** | Full and 88% eclipsed, 6° up and 5° right: deep red, brightening to copper toward the edge of Earth's shadow, with the clouds lit crimson from the towns below and pale gold lightning, three times as likely to strike the ground | Blood |
+| **Blood Moon** | Full and 88% eclipsed, 6° up and 5° right: deep red, brightening to copper toward the edge of Earth's shadow, with the clouds lit crimson from the towns below and pale gold lightning, three times as likely to strike the ground, no shooting stars, and a flock of crows every 15 minutes or so | Blood |
 | **New Moon** | None: the stars, and the towns' orange glow on the clouds | Sodium |
 
 The built-in scenes never change. Changing any of their settings, in the Sky tab or the lightning colour and ground strikes in the Weather tab, carries the scene into one unsaved scene, shown in italics as **Custom**, and continues there. There is only ever one: changing a different built-in scene replaces it. **Keep…** names it and saves it as a scene of your own, with its grade, and **Discard** drops it and returns to the built-in scene it came from. **+** keeps whatever is on screen straight away as a new scene of your own. Your own scenes are shown with a dashed outline. Each keeps every change made while it is active, is never changed by anything done elsewhere, and can be deleted with a second click to confirm.
@@ -220,7 +221,7 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
-| How often | Off to 6 per minute | 2 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely |
+| How often | Off to 6 per minute | 2 per minute | The average rate of shooting stars. The readout shows the average wait, such as "every ~2 min". They arrive at random, so actual gaps vary widely. It belongs to the scene, so changing it carries a built-in scene into **Custom**. Blood Moon has none |
 | Shooting star | Button | | Sends a shooting star immediately, like `M` |
 
 **Aircraft**
@@ -234,6 +235,15 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | Contrail glitter | None to ×3 | ×1 | How strongly ice crystals in the contrail glint in the moonlight |
 | Reset | Button | | Returns every aircraft setting to its default |
 | Aircraft | Button | | Sends an aircraft immediately, like `P`. It starts at the far end of its course, so it may first appear as a faint point near the horizon |
+
+**Crows**
+
+A flock of crows comes in from all round the edges of the view, gathers into a loose flock and flies on out toward the moon, crossing in front of it and shrinking into specks over about 45 seconds. They are black silhouettes, so they show against the moon, its glow, the sky and lit cloud, and cloud nearer than a crow hides it.
+
+| Control | Range | Default | What it does |
+| --- | --- | --- | --- |
+| How often | Off to every 60 min | Off (every ~15 min in Blood Moon) | The average time between flocks. Each wait is random, between 75% and 125% of this, and is counted from when the last flock has gone. It belongs to the scene, so changing it carries a built-in scene into **Custom** |
+| Crows | Button | | Sends a flock immediately, like `C` |
 
 **Ground**
 
@@ -280,7 +290,7 @@ All settings are saved per browser in `localStorage`, under these keys:
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
-| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, eclipse, height and direction, twinkle, star reach, shooting star rate, town light brightness and colour, their glow on the clouds, and the lightning colour and share of ground strikes |
+| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, eclipse, height and direction, twinkle, star reach, shooting star rate, town light brightness and colour, their glow on the clouds, the lightning colour and share of ground strikes, and how often crows come |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
 | `moonlit-cloud-sea:tab` | The settings tab you used last |
