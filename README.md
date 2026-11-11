@@ -369,7 +369,7 @@ The moon and the clouds never move, so most of the lighting is computed once on 
 - **Optical depth straight up**, used for ambient occlusion in basins and under cloud bodies.
 - **The cloud shape itself**, as a signed distance.
 
-The bake runs in small chunks across several frames to avoid stalling the GPU. It renders into a 2D atlas of slices, which is read back and uploaded as a 256 by 96 by 256 3D texture that wraps with the tile.
+The bake runs in small chunks across several frames to avoid stalling the GPU. Each chunk is drawn in strips, one a frame, whose size follows the frame rate: they shrink while frames come slowly and grow back while frames come quickly, so a slow graphics chip never gets one long draw that would stall the whole browser or trip the driver's timeout. Every point is baked on its own, so the result is the same however the work is cut. The shaders read the noise and the bake at an explicit level of detail (both have only one), which gives identical results but spares Windows' shader compiler from unrolling the long ray-march loops, which could take it many seconds. It renders into a 2D atlas of slices, which is read back and uploaded as a 256 by 96 by 256 3D texture that wraps with the tile.
 
 At render time the cloud shape is read from the bake, and one octave of finer live billowing is added on top. In clear air a sample is a single texture read, and the baked distance also says how far a ray can safely skip. This made the cloud pass roughly five times cheaper than rebuilding the full field per sample.
 
