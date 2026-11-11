@@ -304,6 +304,7 @@ To return everything to the defaults, clear the site's storage in the browser, o
 | URL | Effect |
 | --- | --- |
 | `index.html?noclouds` | Hides the clouds to show the ground on its own, for inspecting the terrain |
+| `index.html?diag` | Shows startup diagnostics: the graphics chip and driver path Chrome reports, the step about to run (so a freeze shows where it stuck), and once the scene is up, the slow steps with their call time and the gap before each frame. The full table goes to the developer console |
 | `index.html?notitle` | Skips the title screen and opens straight onto the scene, as the page did before |
 
 ## What is in the scene

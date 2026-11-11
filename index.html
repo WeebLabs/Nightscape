@@ -2221,6 +2221,52 @@ function titleReady() {
   titleEl.classList.add('clear');
   setTimeout(clearTitle, 3800);   // the title and the blurred scene fade in over about 2 s, then rest a moment
 }
+/* ---------------------------------------------------------------------------
+   Startup diagnostics (?diag): times every step of the startup, and the gap before
+   each frame (a GPU that has stopped answering shows as a long gap), and keeps on
+   screen the step about to run, so a freeze shows where it stuck. Once the scene is
+   up it lists the slow steps, with the graphics chip and driver path Chrome reports,
+   and logs the whole table to the console. Nothing of this runs without ?diag.
+--------------------------------------------------------------------------- */
+const DIAG = /[?&]diag\b/.test(location.search);
+const diagLog = [], diagT0 = performance.now();
+let diagEl = null, diagGPUName = '', diagDone = false;
+if (DIAG) {
+  diagEl = document.createElement('pre');
+  diagEl.style.cssText = 'position:fixed;left:8px;top:8px;z-index:10;margin:0;padding:8px 10px;max-width:calc(100vw - 32px);' +
+    'white-space:pre-wrap;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#dfe8f5;background:rgba(0,0,0,0.75);border-radius:6px;pointer-events:none';
+  document.body.appendChild(diagEl);
+  const g = renderer.getContext(), e = g.getExtension('WEBGL_debug_renderer_info');
+  diagGPUName = e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER);
+}
+// what the next startup frame will do
+function diagStage() {
+  if (bakeChunk < BAKE_CHUNKS) return 'cloud bake, chunk ' + (bakeChunk + 1) + ' of ' + BAKE_CHUNKS + (bakeChunk === 0 && bakeRow === 0 ? ' (first use: compiles the bake shader)' : '');
+  if (bakeChunk === BAKE_CHUNKS) return 'cloud bake: read back from the GPU and repacked';
+  if (terJob < TER_JOBS.length) {
+    const first = terJob === 0 ? ' (first use: compiles the terrain height shader)' : terJob === 4 ? ' (first use: compiles the terrain lighting shader)'
+      : terJob === 18 ? ' (first use: compiles the town lights shader)' : '';
+    return 'terrain job ' + (terJob + 1) + ' of ' + TER_JOBS.length + first;
+  }
+  return 'terrain: heights read back from the GPU';
+}
+function diagStep(step, ms, gap) {
+  if (!DIAG || diagDone) return;
+  diagLog.push({ step, ms: Math.round(ms), gapBefore: Math.round(gap), at: Math.round(performance.now() - diagT0) });
+  const next = baked ? (frame < 6 ? 'frame ' + (frame + 1) + (frame === 0 ? ' (first frame: compiles the scene shaders)' : '') : 'done') : diagStage();
+  diagEl.textContent = 'Nightscape startup (?diag)\n' + diagGPUName + '\n' + Math.round(performance.now() - diagT0) + ' ms in, next: ' + next;
+  if (baked && frame >= 6) {
+    diagDone = true;
+    const slow = diagLog.filter(d => d.ms > 40 || d.gapBefore > 120);
+    const paint = performance.getEntriesByType('paint').map(e => e.name + ' ' + Math.round(e.startTime) + ' ms').join(', ');
+    let t = 'Nightscape startup (?diag)\n' + diagGPUName + '\nsetup script ' + (window.__nsSetup | 0) + ' ms; ' + (paint || 'no paint timings') +
+      '\nfinished ' + Math.round(performance.now() - diagT0) + ' ms after setup, in ' + diagLog.length + ' steps\n\nslow steps (call time / gap before):\n';
+    for (const d of slow) t += d.ms + ' / ' + d.gapBefore + ' ms   at ' + d.at + ' ms   ' + d.step + '\n';
+    if (!slow.length) t += 'none\n';
+    diagEl.textContent = t;
+    console.table(diagLog);
+  }
+}
 // the loading bar: how much of the cloud and terrain bake is done
 const titleBar = document.getElementById('title-bar');
 function titleProgress(f) { if (titleBar) titleBar.style.width = (Math.min(Math.max(f, 0), 1) * 100).toFixed(1) + '%'; }
@@ -2931,8 +2977,10 @@ function adapt(rawDt) {
 
 function loop(now) {
   if (!baked) {
+    const step = DIAG ? diagStage() : '', t0 = DIAG ? performance.now() : 0;
     if (bakeChunk !== Infinity) bakeStep(now - last);
     else if (terrainStep()) { baked = true; status.classList.remove('on'); }
+    if (DIAG) diagStep(step, performance.now() - t0, now - last);
     titleProgress((Math.min(bakeChunk + bakeRow / BAKE_N, BAKE_CHUNKS) + terJob) / (BAKE_CHUNKS + TER_JOBS.length + 1));
     last = now; requestAnimationFrame(loop); return;
   }
@@ -2945,7 +2993,9 @@ function loop(now) {
     clock += dt;
   }
   frame++;
+  const tr = DIAG ? performance.now() : 0;
   render(dt);
+  if (DIAG) diagStep('frame ' + frame + (frame === 1 ? ' (first frame: compiles the scene shaders)' : ''), performance.now() - tr, raw * 1000);
   adapt(raw);
   perfTick(raw);
   if (!shown && frame > 2) {
@@ -4340,7 +4390,7 @@ window.__cloudScene = {
 // be up meanwhile. (The timeout is the fallback where frames are not being drawn yet.)
 (function () {
   let started = false;
-  const start = () => { if (!started) { started = true; nightscape(); } };
+  const start = () => { if (!started) { started = true; const t = performance.now(); nightscape(); window.__nsSetup = performance.now() - t; } };
   requestAnimationFrame(() => setTimeout(start, 0));
   setTimeout(start, 1000);
 })();
