@@ -112,7 +112,7 @@ Press `G` or click the corner button to open the panel. Its settings are organis
 
 ### Scene
 
-A scene is the look of one moment: the moon's phase, height and direction, its earthshine, the town lights and their glow on the clouds, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
+A scene is the look of one moment: the moon's phase, height and direction, its earthshine and any eclipse, the town lights, their colour and their glow on the clouds, and a colour grade chosen to suit them. Picking a scene sets all of them at once.
 
 | Scene | Moon | Grade |
 | --- | --- | --- |
@@ -121,6 +121,7 @@ A scene is the look of one moment: the moon's phase, height and direction, its e
 | **Golden Moon** | Full, 2.5° up and 4° right, gold | Golden Moon |
 | **High Moon** | Full, 24° up, cool and bright | Moonlit Blue |
 | **Crescent** | A thin waxing crescent 8° up, with strong earthshine | Deep Sea |
+| **Blood Moon** | Full and 88% eclipsed, 6° up and 5° right: deep red, brightening to copper toward the edge of Earth's shadow, with the clouds lit crimson from the towns below | Blood |
 | **New Moon** | None: the stars, and the towns' orange glow on the clouds | Sodium |
 
 The built-in scenes never change. Changing any of their settings, in the Sky tab, carries the scene into one unsaved scene, shown in italics as **Custom**, and continues there. There is only ever one: changing a different built-in scene replaces it. **Keep…** names it and saves it as a scene of your own, with its grade, and **Discard** drops it and returns to the built-in scene it came from. **+** keeps whatever is on screen straight away as a new scene of your own. Your own scenes are shown with a dashed outline. Each keeps every change made while it is active, is never changed by anything done elsewhere, and can be deleted with a second click to confirm.
@@ -140,6 +141,7 @@ The grade is applied in the final pass, after ACES tone mapping, so it costs not
 | **Silver** | Nearly monochrome |
 | **Ember** | Blue shadows and warm highlights with no green, for a moon on the horizon |
 | **Sodium** | Cool shadows that keep the towns' orange glow warm, for a moonless night |
+| **Blood** | Crimson highlights and a blood-red glow in the blacks, for a blood moon |
 
 Picking a profile, or changing any control, changes only the active scene's grade. The panel names the scene and the profile its grade came from, and whether it has been changed. From there:
 
@@ -201,6 +203,7 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | --- | --- | --- | --- |
 | Phase | New, through full, back to new | Full moon | The moon's phase. The left half of the slider waxes, lit on the right, and the right half wanes. The readout names the phase and shows how much of the disc is lit. A thinner moon lights the clouds and ground less, casts weaker light shafts, has a fainter glow and lets more stars show around it. Town lights, mast beacons and lightning are not affected |
 | Earthshine | None to ×4 | ×1 | How bright the faint, cool earthshine on the moon's dark part is. It is strongest on a thin crescent and fades away toward full |
+| Eclipse | None to total | None | A total eclipse of the moon. The full moon in Earth's shadow is lit only by sunlight bent through the edge of Earth's atmosphere, so it turns a dim, deep copper red at any height, and so does the little light it casts. The towns' glow on the clouds grows as the moon's light goes |
 | Height | 1° to 75° | 12° | The moon's height above the horizon. Its light crosses more air the lower it sits, so it turns orange and then red near the horizon and dims a little, and so does the light it casts on the clouds and ground. Above 12° it whitens slightly. The cloud and terrain shadows are rebaked in the background about a third of a second after the slider stops |
 | Direction | 180° left to 180° right | 15° left | Where the moon sits around the horizon, measured from straight ahead along the flight |
 
@@ -236,6 +239,7 @@ Storms far beyond the horizon flicker silently now and then, lighting the sky lo
 | --- | --- | --- | --- |
 | Town lights | Off to ×3 | ×1.95 | Brightness of the town, road and farmhouse lights and the glow they cast on the ground and lakes. It is a single multiplication at render time and needs no rebake. It does not affect the red mast lights |
 | Glow on clouds | None to ×3 | ×0.85 | How strongly the towns' scattered orange glow lights the deck from below. It shows on the underside of the cloud and creeps a little way up the walls of gaps. It grows as the moon thins: at ×1 it runs from a faint 0.2 at full moon to 0.55 at new moon, following the lit percentage, and the setting multiplies both ends. It also scales with Town lights |
+| Light colour | Sodium orange to blood red | Sodium orange | The colour of the town lights and of their glow on the clouds |
 
 ### Sound
 
@@ -274,7 +278,7 @@ All settings are saved per browser in `localStorage`, under these keys:
 | `moonlit-cloud-sea:storm:v1` | Lightning on or off, storm activity and minimum gap |
 | `moonlit-cloud-sea:distant:v1` | All distant-storm settings |
 | `moonlit-cloud-sea:aircraft:v1` | All aircraft settings |
-| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, height and direction, twinkle, star reach, shooting star rate, town light brightness and their glow on the clouds |
+| `moonlit-cloud-sea:sky:v1` | Moon phase, earthshine, eclipse, height and direction, twinkle, star reach, shooting star rate, town light brightness and colour, and their glow on the clouds |
 | `moonlit-cloud-sea:quality:v1` | Cloud resolution and whether it adjusts automatically |
 | `moonlit-cloud-sea:sound:v1` | Sound on or off, and the five sound levels |
 | `moonlit-cloud-sea:tab` | The settings tab you used last |
