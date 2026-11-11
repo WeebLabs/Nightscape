@@ -1751,7 +1751,13 @@ void main(){
     col += uFarCol.rgb * uFar.w * g * (c.a + uFarCol.w * (2.5 * c.a * (1.0 - c.a) + 0.06));
   }
   float rays = texture2D(tRays, vUv).r;
-  col += rays * vec3(0.74, 0.80, 0.95) * uMoonDiskTint * 0.6 * uRays * uMoonL * (1.0 - 0.8 * diskMask * litAt * c.a);
+  // The shafts are held down to a fifth over the lit disc, so as not to wash it out. That reaches
+  // right out to the disc's drawn edge (matched to the pixel, as in moonDisk): stopping short of it,
+  // as diskMask does, would leave the disc's outermost sliver under the shafts at full strength, a
+  // thin bright ring around the moon. Outside the disc the shafts are untouched.
+  float rayMask = 1.0 - smoothstep(uMoonR - uPixAng * 1.2, uMoonR + uPixAng * 0.6, am);
+  float rayLit = rayMask > 0.0 ? moonLitAt(rd, m) : 1.0;
+  col += rays * vec3(0.74, 0.80, 0.95) * uMoonDiskTint * 0.6 * uRays * uMoonL * (1.0 - 0.8 * rayMask * rayLit * c.a);
 
   // ---- colour grade (all of it driven from the panel) ----
   const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
