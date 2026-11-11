@@ -1038,9 +1038,13 @@ void main(){
   vec3 rd = normalize(uCamF + uCamR * ndc.x * uTanHalf * uAspect + uCamU * ndc.y * uTanHalf);
   vec3 ro = uCamPos;
 
-  // How far the march reaches: further for rays rising over the horizon, blended by
+  // How far the march reaches: further for rays near and above the horizon, blended by
   // height so neighbouring rays never switch between two limits from one frame to the next.
-  float tFar = mix(200.0, 320.0, smoothstep(0.0, 0.04, rd.y));
+  // Rays a little below the horizon reach as far as those above it: the base of a tall cloud
+  // 250-320 units off is seen about a degree down, and stopping those rays short cut it off
+  // flat at the horizon instead of letting the deck in front hide it. (Steeper rays leave
+  // through the base of the deck before 250 anyway.)
+  float tFar = mix(200.0, 320.0, smoothstep(-0.05, -0.02, rd.y));
   float tMax = tFar;
   // (rays that leave through the base of the deck see the ocean far below)
   if (rd.y > 0.0) tMax = min(tMax, (Y_MAX - ro.y) / rd.y);
