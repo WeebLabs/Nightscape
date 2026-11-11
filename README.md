@@ -103,7 +103,7 @@ Settings you choose in the panel are saved in that browser's local storage. A wa
 | `C` | Sends a flock of crows now |
 | `S` | Turns sound on or off. If sound is on but has not started yet, it starts it |
 
-When the page opens, a title screen shows the name over a starry night while the clouds are prepared, which takes a few seconds. The scene then fades in behind the title, and the title clears by itself a few seconds later, so the page still works as a wallpaper that never gets a click. A click or key press clears it sooner.
+When the page opens, a thin loading bar shows while the clouds are prepared, which takes a few seconds. The title then fades in over the scene, which opens out of focus, rests a moment and pulls into focus as the title fades away, all by itself, so the page still works as a wallpaper that never gets a click. A click or key press does it sooner.
 
 In the settings panel, the left and right arrow keys move between tabs when a tab has keyboard focus, and `Home` and `End` jump to the first and last tab. The other keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
 

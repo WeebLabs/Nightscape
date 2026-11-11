@@ -22,8 +22,11 @@
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--night); }
   canvas {
     position: fixed; inset: 0; width: 100%; height: 100%; display: block;
-    opacity: 0; transition: opacity 3.5s ease;
+    opacity: 0; transition: opacity 3.5s ease, filter 3s ease, transform 3s ease;
   }
+  /* behind the title the scene opens out of focus, then sharpens (scaled up a touch, so the
+     blur never pulls the dark page in at the edges) */
+  canvas.soft { filter: blur(16px); transform: scale(1.05); }
   body.idle canvas { cursor: none; }
   canvas.on { opacity: 1; }
   #hint, #status {
@@ -43,7 +46,8 @@
   }
   @media (prefers-reduced-motion: reduce) { canvas, #hint, #grade, #grade .body { transition: none; } }
 
-  /* ---- title screen: over the page while the clouds bake, then the scene fades in behind it ---- */
+  /* ---- loading and title: a loading bar on the dark page while the clouds bake, then the title
+     fades in over the scene, which opens out of focus ---- */
   #title {
     position: fixed; inset: 0; z-index: 4; display: grid; place-items: center; padding: 16px;
     user-select: none; -webkit-user-select: none;
@@ -52,27 +56,20 @@
   #title.gone { animation: title-out 2.4s ease both; pointer-events: none; }
   @keyframes title-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes title-out { from { opacity: 1; } to { opacity: 0; } }
-  #title .sky {
-    position: absolute; inset: 0; overflow: hidden;
-    background: radial-gradient(130% 85% at 50% 115%, #0d1a33 0%, #070d1c 48%, var(--night) 100%);
-    transition: opacity 3.5s ease;
-  }
+  #title .sky { position: absolute; inset: 0; background: var(--night); transition: opacity 1.6s ease; }
   #title.clear .sky { opacity: 0; }
-  #title .sky i {
-    position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #e2e8ff;
-    opacity: 0.2; animation: twinkle 4.5s ease-in-out infinite;
+  #title .load {
+    position: absolute; left: 50%; top: 50%; width: min(220px, 56vw); height: 2px; margin-left: calc(min(220px, 56vw) / -2);
+    border-radius: 1px; background: rgba(196, 210, 235, 0.12); overflow: hidden; transition: opacity 0.8s ease;
   }
-  @keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.85; } }
+  #title .load i { display: block; width: 0; height: 100%; background: rgba(214, 224, 242, 0.7); transition: width 0.3s ease; }
+  #title.clear .load { opacity: 0; }
   #title .card {
     position: relative; text-align: center; color: #efe6d2; transform: translateY(-5vh);
+    opacity: 0; transition: opacity 1.8s ease 0.3s;
     text-shadow: 0 0 28px rgba(4, 7, 15, 0.9), 0 0 10px rgba(4, 7, 15, 0.6), 0 1px 3px rgba(4, 7, 15, 0.8);
   }
-  #title .moon {
-    width: 30px; height: 30px; margin: 0 auto 26px; border-radius: 50%;
-    box-shadow: inset 8px -5px 0 0 #f3e2b9; transform: rotate(-18deg);
-    filter: drop-shadow(0 0 9px rgba(255, 224, 168, 0.5)); transition: opacity 2s ease;
-  }
-  #title.clear .moon { opacity: 0; }   /* (the real moon takes over) */
+  #title.clear .card { opacity: 1; }
   #title h1 {
     margin: 0; padding-left: 0.16em; letter-spacing: 0.16em;
     font: 400 clamp(40px, 9vw, 92px)/1 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
@@ -81,15 +78,9 @@
     margin: 18px 0 0; color: rgba(232, 222, 202, 0.72); letter-spacing: 0.02em;
     font: italic 400 clamp(15px, 2.1vw, 19px)/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   }
-  #title .wait {
-    margin: 46px 0 0; color: var(--hint); transition: opacity 1.2s ease;
-    font: italic 400 14px/1.4 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  }
-  #title .wait.done { opacity: 0; }
   @media (prefers-reduced-motion: reduce) {
     #title, #title.gone { animation-duration: 0.01s; }
-    #title .sky, #title .wait, #title .moon { transition: none; }
-    #title .sky i { animation: none; opacity: 0.5; }
+    #title .sky, #title .load, #title .load i, #title .card, canvas { transition: none; }
   }
 
   /* ---- grade panel ---- */
@@ -194,26 +185,17 @@
 <div id="status">Lighting the clouds…</div>
 <div id="title">
   <div class="sky"></div>
+  <div class="load" role="progressbar" aria-label="Preparing the clouds"><i id="title-bar"></i></div>
   <div class="card">
-    <div class="moon" aria-hidden="true"></div>
     <h1>Nightscape</h1>
     <p class="sub">An endless flight above a moonlit sea of clouds</p>
-    <p class="wait" id="title-wait">Lighting the clouds…</p>
   </div>
 </div>
 <script>
-// the title's stars, straight away (or no title at all: ?notitle, and the test and recording modes)
+// no title at all with ?notitle, and in the test and recording modes (decided before the page shows)
 (function () {
   var t = document.getElementById('title');
-  if (window.__cloudDebug || /[?&]notitle\b/.test(location.search)) { t.parentNode.removeChild(t); return; }
-  var sky = t.querySelector('.sky');
-  for (var i = 0; i < 70; i++) {
-    var st = document.createElement('i');
-    st.style.cssText = 'left:' + (Math.random() * 100).toFixed(2) + '%;top:' + (Math.random() * 78).toFixed(2) + '%;' +
-      'animation-delay:' + (-Math.random() * 4.5).toFixed(2) + 's;animation-duration:' + (3.5 + Math.random() * 3).toFixed(2) + 's;' +
-      (Math.random() > 0.85 ? 'width:3px;height:3px;' : '');
-    sky.appendChild(st);
-  }
+  if (window.__cloudDebug || /[?&]notitle\b/.test(location.search)) t.parentNode.removeChild(t);
 })();
 </script>
 <div id="grade" aria-label="Settings">
@@ -2220,29 +2202,33 @@ const hint = document.getElementById('hint');
 const status = document.getElementById('status');
 
 /* ---------------------------------------------------------------------------
-   Title screen: the name over a starry night while the clouds bake (it takes the
-   place of the plain "Lighting the clouds" line). Once the scene is drawn it fades
-   in behind the title, which then clears by itself after a few seconds, so the page
-   still works as a wallpaper that never gets a click. A click or key press clears it
-   sooner. ?notitle skips it, as do the test and recording modes.
+   Loading and title: a thin loading bar on the dark page while the clouds bake (in place
+   of the plain "Lighting the clouds" line). Once the scene is drawn, the bar gives way to
+   the title, and the scene fades in behind it out of focus, rests a moment, then pulls
+   into focus as the title fades away, all by itself, so the page still works as a wallpaper that never gets a
+   click. A click or key press does it sooner. ?notitle skips it, as do the test and
+   recording modes.
 --------------------------------------------------------------------------- */
 const titleEl = document.getElementById('title');   // (gone already if it is not wanted; see the script after it)
 const titleOn = !!titleEl;
 const titleT = { done: false, ready: false };
-if (titleOn) status.hidden = true;
+if (titleOn) { status.hidden = true; canvas.classList.add('soft'); }
 // the first frames are drawn: let the scene come up behind the title, and clear it a few seconds later
 function titleReady() {
   if (!titleOn) { showUI(); return; }
   titleT.ready = true;
-  document.getElementById('title-wait').classList.add('done');
+  titleProgress(1);
   titleEl.classList.add('clear');
-  const hold = 7000;   // the sky fades over 3.5 s, then the title rests on the scene a few seconds
-  setTimeout(clearTitle, hold);
+  setTimeout(clearTitle, 3800);   // the title and the blurred scene fade in over about 2 s, then rest a moment
 }
+// the loading bar: how much of the cloud and terrain bake is done
+const titleBar = document.getElementById('title-bar');
+function titleProgress(f) { if (titleBar) titleBar.style.width = (Math.min(Math.max(f, 0), 1) * 100).toFixed(1) + '%'; }
 function clearTitle() {
   if (titleT.done || !titleT.ready) return;
   titleT.done = true;
   titleEl.classList.add('gone');
+  canvas.classList.remove('soft');
   setTimeout(() => titleEl.remove(), 2600);
   setTimeout(showUI, 1200);
 }
@@ -2937,6 +2923,7 @@ function loop(now) {
   if (!baked) {
     if (bakeChunk !== Infinity) bakeStep();
     else if (terrainStep()) { baked = true; status.classList.remove('on'); }
+    titleProgress((Math.min(bakeChunk, BAKE_CHUNKS) + terJob) / (BAKE_CHUNKS + TER_JOBS.length + 1));
     last = now; requestAnimationFrame(loop); return;
   }
   moonBakeStep();
