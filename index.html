@@ -43,6 +43,55 @@
   }
   @media (prefers-reduced-motion: reduce) { canvas, #hint, #grade, #grade .body { transition: none; } }
 
+  /* ---- title screen: over the page while the clouds bake, then the scene fades in behind it ---- */
+  #title {
+    position: fixed; inset: 0; z-index: 4; display: grid; place-items: center; padding: 16px;
+    user-select: none; -webkit-user-select: none;
+    animation: title-in 1.6s ease 0.15s both;   /* (as soon as the page shows, before the scripts have run) */
+  }
+  #title.gone { animation: title-out 2.4s ease both; pointer-events: none; }
+  @keyframes title-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes title-out { from { opacity: 1; } to { opacity: 0; } }
+  #title .sky {
+    position: absolute; inset: 0; overflow: hidden;
+    background: radial-gradient(130% 85% at 50% 115%, #0d1a33 0%, #070d1c 48%, var(--night) 100%);
+    transition: opacity 3.5s ease;
+  }
+  #title.clear .sky { opacity: 0; }
+  #title .sky i {
+    position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #e2e8ff;
+    opacity: 0.2; animation: twinkle 4.5s ease-in-out infinite;
+  }
+  @keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.85; } }
+  #title .card {
+    position: relative; text-align: center; color: #efe6d2; transform: translateY(-5vh);
+    text-shadow: 0 0 28px rgba(4, 7, 15, 0.9), 0 0 10px rgba(4, 7, 15, 0.6), 0 1px 3px rgba(4, 7, 15, 0.8);
+  }
+  #title .moon {
+    width: 30px; height: 30px; margin: 0 auto 26px; border-radius: 50%;
+    box-shadow: inset 8px -5px 0 0 #f3e2b9; transform: rotate(-18deg);
+    filter: drop-shadow(0 0 9px rgba(255, 224, 168, 0.5)); transition: opacity 2s ease;
+  }
+  #title.clear .moon { opacity: 0; }   /* (the real moon takes over) */
+  #title h1 {
+    margin: 0; padding-left: 0.16em; letter-spacing: 0.16em;
+    font: 400 clamp(40px, 9vw, 92px)/1 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+  #title .sub {
+    margin: 18px 0 0; color: rgba(232, 222, 202, 0.72); letter-spacing: 0.02em;
+    font: italic 400 clamp(15px, 2.1vw, 19px)/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+  #title .wait {
+    margin: 46px 0 0; color: var(--hint); transition: opacity 1.2s ease;
+    font: italic 400 14px/1.4 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+  #title .wait.done { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    #title, #title.gone { animation-duration: 0.01s; }
+    #title .sky, #title .wait, #title .moon { transition: none; }
+    #title .sky i { animation: none; opacity: 0.5; }
+  }
+
   /* ---- grade panel ---- */
   :root {
     --panel-bg: rgba(7, 18, 22, 0.66);
@@ -143,6 +192,30 @@
 <body>
 <div id="hint">Double-click for full screen · G for settings · L for lightning · S for sound</div>
 <div id="status">Lighting the clouds…</div>
+<div id="title">
+  <div class="sky"></div>
+  <div class="card">
+    <div class="moon" aria-hidden="true"></div>
+    <h1>Nightscape</h1>
+    <p class="sub">An endless flight above a moonlit sea of clouds</p>
+    <p class="wait" id="title-wait">Lighting the clouds…</p>
+  </div>
+</div>
+<script>
+// the title's stars, straight away (or no title at all: ?notitle, and the test and recording modes)
+(function () {
+  var t = document.getElementById('title');
+  if (window.__cloudDebug || /[?&]notitle\b/.test(location.search)) { t.parentNode.removeChild(t); return; }
+  var sky = t.querySelector('.sky');
+  for (var i = 0; i < 70; i++) {
+    var st = document.createElement('i');
+    st.style.cssText = 'left:' + (Math.random() * 100).toFixed(2) + '%;top:' + (Math.random() * 78).toFixed(2) + '%;' +
+      'animation-delay:' + (-Math.random() * 4.5).toFixed(2) + 's;animation-duration:' + (3.5 + Math.random() * 3).toFixed(2) + 's;' +
+      (Math.random() > 0.85 ? 'width:3px;height:3px;' : '');
+    sky.appendChild(st);
+  }
+})();
+</script>
 <div id="grade" aria-label="Settings">
   <button class="toggle" type="button" aria-expanded="false" aria-controls="grade-body" title="Settings (G)">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -154,7 +227,7 @@
 <div id="msg">This scene needs WebGL 2. Open it in a current version of Chrome, Edge, Firefox or Safari.</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-(function () {
+function nightscape() {
 'use strict';
 
 /* ---------------------------------------------------------------------------
@@ -2147,6 +2220,44 @@ const hint = document.getElementById('hint');
 const status = document.getElementById('status');
 
 /* ---------------------------------------------------------------------------
+   Title screen: the name over a starry night while the clouds bake (it takes the
+   place of the plain "Lighting the clouds" line). Once the scene is drawn it fades
+   in behind the title, which then clears by itself after a few seconds, so the page
+   still works as a wallpaper that never gets a click. A click or key press clears it
+   sooner. ?notitle skips it, as do the test and recording modes.
+--------------------------------------------------------------------------- */
+const titleEl = document.getElementById('title');   // (gone already if it is not wanted; see the script after it)
+const titleOn = !!titleEl;
+const titleT = { done: false, ready: false };
+if (titleOn) status.hidden = true;
+// the first frames are drawn: let the scene come up behind the title, and clear it a few seconds later
+function titleReady() {
+  if (!titleOn) { showUI(); return; }
+  titleT.ready = true;
+  document.getElementById('title-wait').classList.add('done');
+  titleEl.classList.add('clear');
+  const hold = 7000;   // the sky fades over 3.5 s, then the title rests on the scene a few seconds
+  setTimeout(clearTitle, hold);
+}
+function clearTitle() {
+  if (titleT.done || !titleT.ready) return;
+  titleT.done = true;
+  titleEl.classList.add('gone');
+  setTimeout(() => titleEl.remove(), 2600);
+  setTimeout(showUI, 1200);
+}
+// the settings button, and the hint along the bottom for a few seconds
+function showUI() {
+  gradeEl.classList.add('ready');
+  setTimeout(() => hint.classList.add('on'), titleOn ? 1500 : 2500);
+  setTimeout(() => hint.classList.remove('on'), titleOn ? 6500 : 7500);
+}
+if (titleOn) {
+  titleEl.addEventListener('pointerdown', clearTitle);
+  window.addEventListener('keydown', () => { if (!titleT.done) clearTitle(); });
+}
+
+/* ---------------------------------------------------------------------------
    Light bake: the moon and the clouds never move, so the light reaching every
    point of the world tile is computed once, in small chunks across a few frames.
 --------------------------------------------------------------------------- */
@@ -2843,9 +2954,7 @@ function loop(now) {
   if (!shown && frame > 2) {
     shown = true;
     canvas.classList.add('on');
-    gradeEl.classList.add('ready');
-    setTimeout(() => hint.classList.add('on'), 2500);
-    setTimeout(() => hint.classList.remove('on'), 7500);
+    titleReady();
   }
   if (DBG && DBG.frames && frame >= DBG.frames) { window.__done = true; return; }
   requestAnimationFrame(loop);
@@ -4229,6 +4338,14 @@ window.__cloudScene = {
     rt: boltRT && [boltRT.width, boltRT.height], li: [lightU.uLi0.value, lightU.uLi1.value], R: Math.sqrt(lightU.uLR2.value),
     seg1: flash && flash.seg1, cam: camPos(), next: +(nextFlash - clock).toFixed(2), inRange: !!pickStorm(null) })
 };
+}
+// Start once the page has been drawn: the setup takes a few seconds, and the title screen should
+// be up meanwhile. (The timeout is the fallback where frames are not being drawn yet.)
+(function () {
+  let started = false;
+  const start = () => { if (!started) { started = true; nightscape(); } };
+  requestAnimationFrame(() => setTimeout(start, 0));
+  setTimeout(start, 1000);
 })();
 </script>
 </body>

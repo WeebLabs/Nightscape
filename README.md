@@ -103,6 +103,8 @@ Settings you choose in the panel are saved in that browser's local storage. A wa
 | `C` | Sends a flock of crows now |
 | `S` | Turns sound on or off. If sound is on but has not started yet, it starts it |
 
+When the page opens, a title screen shows the name over a starry night while the clouds are prepared, which takes a few seconds. The scene then fades in behind the title, and the title clears by itself a few seconds later, so the page still works as a wallpaper that never gets a click. A click or key press clears it sooner.
+
 In the settings panel, the left and right arrow keys move between tabs when a tab has keyboard focus, and `Home` and `End` jump to the first and last tab. The other keys are ignored while a panel control has keyboard focus. The pointer and the closed panel button fade out after 2.5 seconds without mouse movement, and come back when you move the mouse.
 
 If your operating system is set to reduce motion, the flight runs at 35% of its normal speed and lightning flashes are softer, slower and single, with no rapid flicker.
@@ -302,6 +304,7 @@ To return everything to the defaults, clear the site's storage in the browser, o
 | URL | Effect |
 | --- | --- |
 | `index.html?noclouds` | Hides the clouds to show the ground on its own, for inspecting the terrain |
+| `index.html?notitle` | Skips the title screen and opens straight onto the scene, as the page did before |
 
 ## What is in the scene
 
